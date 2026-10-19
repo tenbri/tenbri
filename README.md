@@ -1,6 +1,6 @@
 # Tenbri
 
-**The audit trail for AI agents: every decision signed, chained and provable.**
+**Audit trail for AI agents: every decision signed, chained and provable.**
 
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/tenbri/tenbri/badge)](https://scorecard.dev/viewer/?uri=github.com/tenbri/tenbri)
 [![CI](https://github.com/tenbri/tenbri/actions/workflows/ci.yml/badge.svg)](https://github.com/tenbri/tenbri/actions/workflows/ci.yml)
