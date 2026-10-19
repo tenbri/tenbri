@@ -62,7 +62,7 @@
   description: Blob encryption, per-subject keys, erasure
 - name: "area: index"
   color: "c5def5"
-  description: The derived index: SQLite, Parquet, Iceberg
+  description: The derived index (SQLite, Parquet, Iceberg)
 - name: "area: anchor"
   color: "c5def5"
   description: RFC 3161 timestamps, Rekor, witnesses
