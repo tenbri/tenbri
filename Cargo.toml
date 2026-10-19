@@ -13,6 +13,14 @@ license = "Apache-2.0"
 repository = "https://github.com/tenbri/tenbri"
 homepage = "https://github.com/tenbri/tenbri"
 
+# The workspace's own crates, for path dependencies. Release Please moves these versions with
+# [workspace.package] (release-please-config.json); crates.io needs them to publish.
+[workspace.dependencies]
+tenbri-core = { path = "crates/tenbri-core", version = "0.0.0" }
+tenbri-keys = { path = "crates/tenbri-keys", version = "0.0.0" }
+tenbri-store = { path = "crates/tenbri-store", version = "0.0.0" }
+tenbri-writer = { path = "crates/tenbri-writer", version = "0.0.0" }
+
 # Tenbri's own crates have no unsafe code; the binding crates (bindings/*) do not inherit this,
 # because pyo3, napi and wasm-bindgen generate unsafe code.
 [workspace.lints.rust]
