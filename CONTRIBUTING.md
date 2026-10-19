@@ -122,15 +122,17 @@ left in the config. Its subject must not look like the release pull request's (`
 Pre-releases publish to next channels only: npm dist-tag `next`, a PyPI pre-release, a crates.io
 pre-release version, a GitHub pre-release, and only the exact container tag (`0.1.0-alpha.1`).
 
-Before alpha.1, check that Release Please moves the inherited workspace version and `Cargo.lock`:
+`release-please-config.json` is release-type `simple` with TOML `extra-files` for
+`[workspace.package].version` and for the workspace's own entries in `Cargo.lock` (the ones with no
+`source`): Release Please's `rust` type and `cargo-workspace` plugin reject inherited versions. To see
+what the next release pull request would be:
 
 ```bash
-npx release-please release-pr --dry-run --repo-url=tenbri/tenbri --token="$(gh auth token)" \
-  --config-file=release-please-config.json --manifest-file=.release-please-manifest.json
+npx release-please release-pr --dry-run --repo-url=tenbri/tenbri --token="$(gh auth token)"
 ```
 
-If `Cargo.lock` stays behind, release.yml still builds and publishes the right version: it does not
-build with `--locked`, so cargo brings the workspace's own entries up to date.
+release.yml does not build with `--locked`, so a lock file left behind would still publish the right
+version.
 
 ### Stability
 
