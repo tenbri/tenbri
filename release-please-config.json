@@ -12,6 +12,7 @@
       "versioning": "prerelease",
       "prerelease": true,
       "prerelease-type": "alpha",
+      "initial-version": "0.1.0-alpha.1",
       "bump-minor-pre-major": true,
       "extra-files": [
         {

@@ -107,13 +107,14 @@ All crates and packages share one version and one tag. Registries spell pre-rele
 ### Getting to v0.1.0
 
 Until 0.1.0 every release is a pre-release (`versioning: prerelease`, `prerelease: true`,
-`prerelease-type: alpha` in `release-please-config.json`). Each stage is moved by a one-time
+`prerelease-type: alpha` in `release-please-config.json`), starting at `initial-version`
+(0.1.0-alpha.1). Each later stage is moved by a one-time
 `Release-As:` footer on a commit that reaches `main` (an empty one is enough), never by a value
 left in the config. Its subject must not look like the release pull request's (`chore: release ...`):
 
 | Stage | How the release pull request gets its version |
 |---|---|
-| 0.1.0-alpha.1 | `git commit --allow-empty -s -m "chore: start 0.1.0-alpha.1" -m "Release-As: 0.1.0-alpha.1"` |
+| 0.1.0-alpha.1 | Automatic: `initial-version` in the config, used while no release exists yet |
 | 0.1.0-alpha.2 and later | Automatic: each merge of the release pull request increments the counter |
 | 0.1.0-beta.1 | Once the alpha gate passes: `git commit --allow-empty -s -m "chore: start 0.1.0-beta.1" -m "Release-As: 0.1.0-beta.1"` |
 | 0.1.0-rc.1, -rc.2 | `git commit --allow-empty -s -m "chore: start 0.1.0-rc.1" -m "Release-As: 0.1.0-rc.1"`; later rcs increment automatically |
