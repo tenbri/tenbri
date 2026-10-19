@@ -58,6 +58,8 @@ env:
 jobs:
   version:
     runs-on: ubuntu-latest
+    # The gates below read the token secrets, which live in the release environment.
+    environment: release
     timeout-minutes: 5
     outputs:
       tag: ${{ steps.v.outputs.tag }}
