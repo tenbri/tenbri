@@ -285,7 +285,7 @@ jobs:
           cat > Formula/tenbri.rb <<RUBY
           # Written by tenbri/tenbri's release.yml for $TAG. Do not edit by hand.
           class Tenbri < Formula
-            desc "Flight recorder for AI agents: every decision signed, chained and provable"
+            desc "Audit trail for AI agents: every decision signed, chained and provable"
             homepage "https://github.com/$GITHUB_REPOSITORY"
             version "$VERSION"
             license "Apache-2.0"
