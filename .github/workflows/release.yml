@@ -336,7 +336,7 @@ jobs:
     needs: version
     if: needs.version.outputs.crates == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 300
     environment: release
     permissions:
       contents: read
@@ -356,15 +356,23 @@ jobs:
       - env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          # Crates already at this version are left out, so a failed run can be repeated.
-          exclude=() todo=0
-          for name in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.publish == null) | .name'); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' -A "tenbri-release (github.com/$GITHUB_REPOSITORY)" \
-              "https://crates.io/api/v1/crates/$name/$VERSION")
-            if [ "$code" = 200 ]; then echo "$name@$VERSION is already on crates.io."; exclude+=(--exclude "$name"); else todo=1; fi
+          # Crates already at this version are left out, so a failed run can be repeated. crates.io
+          # allows about one new crate every 10 minutes after a short burst, so the first publish of
+          # a crate waits out a 429 and tries again.
+          for attempt in $(seq 1 24); do
+            exclude=() todo=0
+            for name in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.publish == null) | .name'); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -A "tenbri-release (github.com/$GITHUB_REPOSITORY)" \
+                "https://crates.io/api/v1/crates/$name/$VERSION")
+              if [ "$code" = 200 ]; then echo "$name@$VERSION is already on crates.io."; exclude+=(--exclude "$name"); else todo=1; fi
+            done
+            [ "$todo" = 1 ] || exit 0
+            cargo publish --workspace "${exclude[@]}" 2>&1 | tee publish.log && exit 0
+            grep -q '429 Too Many Requests' publish.log || exit 1
+            echo "crates.io is rate limiting new crates (attempt $attempt); trying again in 10 minutes."
+            sleep 600
           done
-          [ "$todo" = 1 ] || exit 0
-          cargo publish --workspace "${exclude[@]}"
+          exit 1
 
   wheels:
     needs: version
