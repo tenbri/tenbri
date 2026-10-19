@@ -11,6 +11,19 @@ homepage.workspace = true
 [lints]
 workspace = true
 
+[features]
+# AWS S3, Cloudflare R2 and MinIO (s3:// and r2:// locations): Stable.
+s3 = ["dep:object_store", "object_store/aws", "dep:futures-util"]
+# Google Cloud Storage and Azure Blob (gs:// and az:// locations): Experimental.
+experimental = ["s3", "object_store/gcp", "object_store/azure"]
+
 [dependencies]
 fs4 = "1"
+getrandom = "0.4"
+futures-util = { version = "0.3", default-features = false, optional = true }
+object_store = { version = "0.14", default-features = false, optional = true }
 sha2 = "0.11"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+async-trait = "0.1"
