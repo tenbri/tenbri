@@ -1,8 +1,10 @@
 //! The `tenbri` binary.
 //!
-//! Exit codes, stable from 0.1.0: 0 success; 1 the stream does not verify (the first broken
-//! sequence number is printed); 2 any other error; 3 `verify` without `--key`: the stream is
-//! consistent with its own genesis key, which proves nothing about who wrote it.
+//! Exit codes, stable from 0.1.0: 0 success; 1 the stream does not verify, or does not match the
+//! `--checkpoint` given (truncated behind it, rewritten, or not signed by the stream); the first
+//! broken sequence number is printed; 2 any other error, a malformed checkpoint file among them;
+//! 3 `verify` without `--key`: the stream is consistent with its own genesis key, which proves
+//! nothing about who wrote it.
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -12,6 +14,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use tenbri_core::{Entry, Head, Role, canon, sign};
 use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
+use tenbri_merkle::{Hash, Note};
 use tenbri_store::{LocalStore, Store};
 use tenbri_writer::{
     RECONCILE_AFTER_MS, ReadError, Reader, Writer, draft_from_json, now_ms, verify,
@@ -50,6 +53,10 @@ enum Command {
         /// Fingerprint (sha256:…) or public key (ed25519:…) of the stream's genesis key.
         #[arg(long, value_name = "FINGERPRINT")]
         key: Option<String>,
+        /// A checkpoint (C2SP signed note) seen before: the stream must still hold exactly the
+        /// entries it covers, so truncation and rewrites behind it are caught.
+        #[arg(long, value_name = "FILE")]
+        checkpoint: Option<PathBuf>,
     },
     /// Print entries by input or action, each with its verification status, one JSON per line.
     Query {
@@ -127,32 +134,68 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
         #[cfg(not(feature = "keychain"))]
         Command::Init { path } => init(path, &keys_dir()?, Backend::File).await,
         Command::Append { path } => append(path, &keys_dir()?).await,
-        Command::Verify { path, key } => {
+        Command::Verify {
+            path,
+            key,
+            checkpoint,
+        } => {
             let pin = key.as_deref().map(pin).transpose()?;
-            let r = verify(&store(path)?, pin.as_deref()).await?;
+            let note = checkpoint
+                .as_deref()
+                .map(|f| {
+                    std::fs::read(f)
+                        .map_err(Fail::from)
+                        .and_then(|b| Note::parse(&b).map_err(Fail::from))
+                        .map_err(|Fail(_, e)| Fail(2, format!("{}: {e}", f.display())))
+                })
+                .transpose()?;
+            let store = store(path)?;
+            let r = verify(&store, pin.as_deref()).await?;
             let stream = r.stream.as_deref().unwrap_or("?");
-            match (&r.broken, r.pinned) {
-                (Some(b), _) => {
-                    println!("broken at seq {}: {}", b.seq, b.error);
-                    println!("{} entries verified before it, stream {stream}", r.entries);
-                    Ok(1)
-                }
-                (None, true) => {
-                    println!(
-                        "verified {} entries, stream {stream}, pinned to {}",
-                        r.entries,
-                        pin.unwrap()
-                    );
-                    Ok(0)
-                }
-                (None, false) => {
-                    println!("consistent: {} entries, stream {stream}", r.entries);
-                    println!(
-                        "NOT pinned: this only shows the stream agrees with its own genesis key; pass --key <fingerprint>"
-                    );
-                    Ok(3)
+            if let Some(b) = &r.broken {
+                println!("broken at seq {}: {}", b.seq, b.error);
+                println!("{} entries verified before it, stream {stream}", r.entries);
+                return Ok(1);
+            }
+            if let Some(note) = &note {
+                // ponytail: reads the stream a second time for its entry hashes; one pass once
+                // tenbri-writer's verify returns them.
+                let mut reader = Reader::new(&store, pin.as_deref());
+                let hashes: Vec<Hash> = read(&mut reader)
+                    .await?
+                    .iter()
+                    .map(|e| {
+                        let h = sign::entry_hash(line(e).as_bytes());
+                        tenbri_core::encoding::prefixed::<32>(&h, "sha256:").expect("a hash")
+                    })
+                    .collect();
+                let cp = &note.checkpoint;
+                match note.check(reader.chain(), &hashes) {
+                    Ok(_) => println!("matches checkpoint {} at size {}", cp.origin, cp.size),
+                    Err(b) => {
+                        println!("broken at seq {}: {}", b.seq, b.error);
+                        println!(
+                            "against checkpoint {} at size {}; the stream has {} entries",
+                            cp.origin,
+                            cp.size,
+                            hashes.len()
+                        );
+                        return Ok(1);
+                    }
                 }
             }
+            if let Some(pin) = pin {
+                println!(
+                    "verified {} entries, stream {stream}, pinned to {pin}",
+                    r.entries
+                );
+                return Ok(0);
+            }
+            println!("consistent: {} entries, stream {stream}", r.entries);
+            println!(
+                "NOT pinned: this only shows the stream agrees with its own genesis key; pass --key <fingerprint>"
+            );
+            Ok(3)
         }
         Command::Query {
             path,
