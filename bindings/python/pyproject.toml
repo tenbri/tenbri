@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "tenbri"
-description = "A flight recorder for AI agents: every decision signed, chained and provable."
+description = "The audit trail for AI agents: every decision signed, chained and provable."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
