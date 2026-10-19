@@ -256,7 +256,7 @@ jobs:
         run: |
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
-          gh release upload "$TAG" -- * --clobber -R "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" --clobber -R "$GITHUB_REPOSITORY" -- *
 
   # The formula points at the archives on the GitHub release, with their checksums. Stable only:
   # brew install tenbri never gives a pre-release.
