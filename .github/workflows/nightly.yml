@@ -50,4 +50,4 @@ jobs:
         with:
           tool: cargo-nextest
       - if: steps.ready.outputs.run == 'true'
-        run: cargo nextest run -p tenbri-store -p tenbri-writer --locked
+        run: cargo nextest run -p tenbri-store -p tenbri-writer -p tenbri-cli --all-features --locked
