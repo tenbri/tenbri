@@ -1,9 +1,15 @@
-# Tenbri
+<p align="center">
+  <img src="docs/assets/mascot.webp" width="220" alt="Tenbri's mascot: a pangolin detective in a deerstalker, holding a magnifying glass and a notebook">
+</p>
 
-**Audit trail for AI agents: every decision signed, chained and provable.**
+<h1 align="center">Tenbri</h1>
 
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/tenbri/tenbri/badge)](https://scorecard.dev/viewer/?uri=github.com/tenbri/tenbri)
-[![CI](https://github.com/tenbri/tenbri/actions/workflows/ci.yml/badge.svg)](https://github.com/tenbri/tenbri/actions/workflows/ci.yml)
+<p align="center"><strong>Audit trail for AI agents: every decision signed, chained and provable.</strong></p>
+
+<p align="center">
+  <a href="https://scorecard.dev/viewer/?uri=github.com/tenbri/tenbri"><img src="https://api.scorecard.dev/projects/github.com/tenbri/tenbri/badge" alt="OpenSSF Scorecard"></a>
+  <a href="https://github.com/tenbri/tenbri/actions/workflows/ci.yml"><img src="https://github.com/tenbri/tenbri/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
 
 Tenbri is an open-source, tamper-evident log of what AI agents decided: who acted, under which rule
 and policy version, from which inputs, and who approved. It is written in Rust, stores plain files
