@@ -1,0 +1,24 @@
+{
+  "name": "@tenbri/node-darwin-x64",
+  "version": "0.0.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "tenbri.darwin-x64.node",
+  "files": [
+    "tenbri.darwin-x64.node"
+  ],
+  "description": "A flight recorder for AI agents: every decision signed, chained and provable.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tenbri/tenbri.git",
+    "directory": "bindings/node"
+  },
+  "os": [
+    "darwin"
+  ]
+}

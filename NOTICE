@@ -1,0 +1,7 @@
+Tenbri
+Copyright 2026 The Tenbri Authors
+
+This product is licensed under the Apache License, Version 2.0 (LICENSE).
+The conformance test vectors in spec/vectors/ are dedicated to the public domain under CC0 1.0.
+Third-party crates bundled in Tenbri's binaries are listed, with their licenses, in
+THIRD-PARTY-LICENSES.html, shipped with each release.

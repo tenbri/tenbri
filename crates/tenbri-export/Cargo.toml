@@ -1,0 +1,12 @@
+[package]
+name = "tenbri-export"
+description = "Tenbri exports to OpenLineage and W3C PROV-JSON."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true

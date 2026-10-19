@@ -1,0 +1,24 @@
+{
+  "name": "@tenbri/node-win32-x64-msvc",
+  "version": "0.0.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "tenbri.win32-x64-msvc.node",
+  "files": [
+    "tenbri.win32-x64-msvc.node"
+  ],
+  "description": "A flight recorder for AI agents: every decision signed, chained and provable.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tenbri/tenbri.git",
+    "directory": "bindings/node"
+  },
+  "os": [
+    "win32"
+  ]
+}

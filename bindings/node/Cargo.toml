@@ -1,0 +1,25 @@
+[package]
+name = "tenbri-node"
+description = "Node.js bindings for Tenbri."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# Ships as the tenbri package on npm, not as a crate.
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", default-features = false, features = ["napi4"] }
+napi-derive = "3"
+
+[build-dependencies]
+napi-build = "2"
+
+# Node provides the napi symbols at load time; a test binary has no Node, so it looks them up itself.
+[dev-dependencies]
+napi = { version = "3", default-features = false, features = ["napi4", "dyn-symbols"] }

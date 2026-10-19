@@ -1,0 +1,12 @@
+[package]
+name = "tenbri-crypt"
+description = "Tenbri blob encryption, per-subject data and digest keys, and erasure."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true

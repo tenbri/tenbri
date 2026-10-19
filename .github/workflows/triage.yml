@@ -1,0 +1,73 @@
+# Issue triage that runs itself, so one maintainer only has to read and decide:
+# - an issue opened without a label gets needs-triage (the templates already set bug or enhancement
+#   and needs-triage);
+# - when the author answers an issue marked needs-info, it goes back to needs-triage (and reopens,
+#   if it had closed);
+# - every day, an issue at needs-info is warned after 10 days without an answer and closed 4 days
+#   later. Nothing else goes stale: an accepted issue waits as long as it takes.
+name: Triage
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  opened:
+    if: github.event_name == 'issues' && toJSON(github.event.issue.labels) == '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - run: gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --add-label needs-triage
+
+  answered:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      !github.event.issue.pull_request &&
+      github.event.comment.user.login == github.event.issue.user.login &&
+      contains(github.event.issue.labels.*.name, 'needs-info')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - run: |
+          gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --remove-label needs-info --remove-label stale --add-label needs-triage
+          if [ "$STATE" = closed ]; then gh issue reopen "$ISSUE" -R "$GITHUB_REPOSITORY"; fi
+        env:
+          STATE: ${{ github.event.issue.state }}
+
+  stale:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      actions: write # actions/stale keeps its place in the Actions cache
+    steps:
+      - uses: actions/stale@v11
+        with:
+          only-labels: needs-info
+          days-before-stale: 10
+          days-before-close: 4
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          stale-issue-label: stale
+          stale-issue-message: >
+            This still needs an answer to the question above. Without one it closes in four days;
+            a comment from you reopens it any time.
+          close-issue-message: >
+            Closing for now, since the details it needs did not come. Comment with them and it
+            reopens.
+          close-issue-reason: not_planned

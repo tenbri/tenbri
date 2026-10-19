@@ -1,0 +1,688 @@
+name: Release
+
+# A tag like v0.1.0 publishes Tenbri everywhere, at one version (CONTRIBUTING.md#releases):
+# - crates.io: every crate, cargo publish --workspace in dependency order (bindings are publish = false);
+# - the GitHub release: the tenbri CLI and the tenbrid daemon for Linux x86_64 and arm64 (static musl), macOS x86_64 and
+#   arm64 and Windows x86_64, each on a runner of its own architecture, with SHA256SUMS, a CycloneDX
+#   SBOM and the third-party licenses (cargo-about), which every archive also carries;
+# - PyPI: tenbri, maturin abi3 wheels for Python 3.10+ (manylinux, musllinux, macOS, Windows) and the sdist;
+# - npm: tenbri and its per-platform @tenbri/node-* packages (napi-rs; glibc and musl Linux, macOS,
+#   Windows), and @tenbri/wasm, the verifier;
+# - Homebrew: Formula/tenbri.rb in tenbri/homebrew-tap, for stable releases only;
+# - ghcr.io/tenbri/tenbri: the CLI (tenbri proxy is the MCP proxy) and tenbrid, for amd64 and arm64, each pushed
+#   by digest and joined into one image, as Artbucket does.
+# Every binary, wheel, archive and the image get a build-provenance attestation (Sigstore); npm
+# packages carry npm provenance.
+#
+# Pre-releases (0.1.0-alpha.1 to -rc.N) go to next channels only: npm dist-tag next, a PyPI
+# pre-release, a crates.io pre-release version, a prerelease GitHub release (release-please), and
+# only the exact container tag. A stable release tags the image X.Y.Z, X.Y when it is the newest of
+# its minor, X when it is the newest of its major (never 0), and latest when it is the newest of all;
+# npm's latest follows the same rule. A patch on an older line never sends people back.
+#
+# The tag must agree with the manifests: Cargo.toml's [workspace.package] version and
+# bindings/wasm/package.json, compared after normalising the pre-release spelling (0.1.0-alpha.1 on
+# crates.io and npm is 0.1.0a1 on PyPI, which the wheels are checked against). Release Please calls
+# this with the tag it made (release-please.yml). Run by hand with a tag, it publishes that release
+# again (a failed run, say): every registry skips a version it already has, and a manifest that
+# disagrees with the tag is only a warning.
+#
+# Each registry is skipped, not failed, until it is set up: crates.io needs a CARGO_REGISTRY_TOKEN
+# secret or the CRATES_IO_TRUSTED_PUBLISHING variable set to true, PyPI a PYPI_API_TOKEN secret or
+# PYPI_TRUSTED_PUBLISHING, npm an NPM_TOKEN secret or NPM_TRUSTED_PUBLISHING, Homebrew a
+# HOMEBREW_APP_ID variable and HOMEBREW_APP_PRIVATE_KEY secret (a GitHub App installed on the tap
+# repository only). Trusted publishers name
+# release-please.yml (and release.yml, for runs by hand) and the release environment.
+on:
+  push:
+    tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to publish, such as v0.1.0
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to publish again, such as v0.1.0
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      pep440: ${{ steps.v.outputs.pep440 }}
+      stable: ${{ steps.v.outputs.stable }}
+      latest: ${{ steps.v.outputs.latest }}
+      major: ${{ steps.v.outputs.major }}
+      minor: ${{ steps.v.outputs.minor }}
+      npm-tag: ${{ steps.v.outputs.npm_tag }}
+      crates: ${{ steps.gates.outputs.crates }}
+      pypi: ${{ steps.gates.outputs.pypi }}
+      npm: ${{ steps.gates.outputs.npm }}
+      homebrew: ${{ steps.gates.outputs.homebrew }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          sparse-checkout: |
+            Cargo.toml
+            bindings/wasm/package.json
+          sparse-checkout-cone-mode: false
+      - id: v
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          REPO: ${{ github.server_url }}/${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          version=${TAG#v}
+          # PyPI spells pre-releases its own way (PEP 440); maturin converts, and the wheels are
+          # checked against this.
+          base=${version%%-*} n=${version##*.}
+          case "$version" in
+            *-alpha.*) pep440="${base}a$n" ;;
+            *-beta.*) pep440="${base}b$n" ;;
+            *-rc.*) pep440="${base}rc$n" ;;
+            *-*) echo "::error::$version is a pre-release spelling this workflow doesn't know (alpha.N, beta.N, rc.N)."; exit 1 ;;
+            *) pep440=$version ;;
+          esac
+          # Every crate inherits [workspace.package] version; the WASM package has its own.
+          cargo=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          wasm=$(jq -r .version bindings/wasm/package.json)
+          for pair in "Cargo.toml:$cargo" "bindings/wasm/package.json:$wasm"; do
+            f=${pair%%:*} have=${pair#*:}
+            if [ "$have" != "$version" ]; then
+              if [ "$EVENT" = workflow_dispatch ]; then
+                echo "::warning::$TAG is on a commit whose $f says $have; publishing again as $version, as asked."
+              else
+                echo "::error::$TAG is on a commit whose $f says $have. Release through the release pull request."
+                exit 1
+              fi
+            fi
+          done
+          { echo "tag=$TAG"; echo "version=$version"; echo "pep440=$pep440"; } >> "$GITHUB_OUTPUT"
+          # Released versions only (no pre-releases), newest last.
+          tags=$(git ls-remote --tags --refs "$REPO" 'v*' | sed 's|.*refs/tags/v||' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V || true)
+          IFS=. read -r major minor _ <<<"$base"
+          newest() { grep -E "^$1" <<<"$tags" | tail -1; }
+          stable=true; case "$version" in *-*) stable=false ;; esac
+          latest=false; [ "$stable" = true ] && [ "$(newest '')" = "$version" ] && latest=true
+          # No 0 tag while the major is 0: 0.x minors may break (CONTRIBUTING.md#stability).
+          ofmajor=false; [ "$stable" = true ] && [ "$major" != 0 ] && [ "$(newest "$major\\.")" = "$version" ] && ofmajor=true
+          ofminor=false; [ "$stable" = true ] && [ "$(newest "$major\\.$minor\\.")" = "$version" ] && ofminor=true
+          if [ "$latest" = true ]; then npm=latest; elif [ "$stable" = true ]; then npm="release-$major.$minor"; else npm=next; fi
+          { echo "stable=$stable"; echo "latest=$latest"; echo "major=$ofmajor"; echo "minor=$ofminor"; echo "npm_tag=$npm"; } >> "$GITHUB_OUTPUT"
+          echo "$TAG: PyPI $pep440, stable=$stable, latest=$latest, $major=$ofmajor, $major.$minor=$ofminor, npm dist-tag $npm"
+      # Which registries are set up. Secrets can't be read in a job's if:, so they are read here.
+      - id: gates
+        env:
+          CARGO_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_TP: ${{ vars.CRATES_IO_TRUSTED_PUBLISHING }}
+          PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          PYPI_TP: ${{ vars.PYPI_TRUSTED_PUBLISHING }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TP: ${{ vars.NPM_TRUSTED_PUBLISHING }}
+          BREW_KEY: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          BREW_APP: ${{ vars.HOMEBREW_APP_ID }}
+        run: |
+          gate() { # name, token, trusted-publishing variable
+            if [ -n "$2" ] || [ "$3" = true ]; then echo "$1=true"; else
+              echo "::warning::Not publishing to $1: no token secret and no trusted publishing variable (release.yml's header)." >&2
+              echo "$1=false"
+            fi
+          }
+          { gate crates "$CARGO_TOKEN" "$CARGO_TP"; gate pypi "$PYPI_TOKEN" "$PYPI_TP"; gate npm "$NPM_TOKEN" "$NPM_TP"; } >> "$GITHUB_OUTPUT"
+          if [ -n "$BREW_KEY" ] && [ -n "$BREW_APP" ]; then echo "homebrew=true"; else echo "homebrew=false"; fi >> "$GITHUB_OUTPUT"
+
+  # The third-party licenses (cargo-about) and the CycloneDX SBOM, once for the release.
+  licenses:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about,cargo-cyclonedx
+      - env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          cargo about generate --workspace --fail about.hbs -o "$RUNNER_TEMP/out/THIRD-PARTY-LICENSES.html"
+          cargo cyclonedx --format json --all-features
+          mkdir -p sbom && find crates bindings -name '*.cdx.json' -exec cp {} sbom/ \;
+          tar -czf "$RUNNER_TEMP/out/tenbri-$VERSION-sbom.cdx.tar.gz" -C sbom .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: licenses
+          path: ${{ runner.temp }}/out/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # The CLI, natively on each architecture's own runner.
+  binaries:
+    needs: [version, licenses]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, runner: ubuntu-24.04 }
+          - { target: aarch64-unknown-linux-musl, runner: ubuntu-24.04-arm }
+          - { target: x86_64-apple-darwin, runner: macos-15-intel }
+          - { target: aarch64-apple-darwin, runner: macos-15 }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: actions/download-artifact@v8
+        with:
+          name: licenses
+          path: ${{ runner.temp }}/licenses
+      # Not --locked: if Release Please left Cargo.lock behind the new version, cargo brings only the
+      # workspace's own entries up to date here (release-please.yml's header).
+      - run: cargo build --release -p tenbri-cli -p tenbri-server --target "$TARGET"
+      - name: Package
+        shell: bash
+        run: |
+          name="tenbri-$VERSION-$TARGET"
+          mkdir -p "$RUNNER_TEMP/$name" dist
+          ext=; [ "$RUNNER_OS" = Windows ] && ext=.exe
+          cp "target/$TARGET/release/tenbri$ext" "target/$TARGET/release/tenbrid$ext" LICENSE NOTICE README.md "$RUNNER_TEMP/licenses/THIRD-PARTY-LICENSES.html" "$RUNNER_TEMP/$name/"
+          if [ "$RUNNER_OS" = Windows ]; then
+            (cd "$RUNNER_TEMP" && 7z a -tzip "$GITHUB_WORKSPACE/dist/$name.zip" "$name" >/dev/null)
+          else
+            tar -czf "dist/$name.tar.gz" -C "$RUNNER_TEMP" "$name"
+          fi
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/*
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bin-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # The archives, SHA256SUMS over everything, the SBOM and the licenses, on the GitHub release.
+  assets:
+    needs: [version, licenses, binaries]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: "{bin-*,licenses}"
+          merge-multiple: true
+      - working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" -- * --clobber -R "$GITHUB_REPOSITORY"
+
+  # The formula points at the archives on the GitHub release, with their checksums. Stable only:
+  # brew install tenbri never gives a pre-release.
+  homebrew:
+    needs: [version, assets]
+    if: needs.version.outputs.homebrew == 'true' && needs.version.outputs.stable == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.HOMEBREW_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          token: ${{ steps.app.outputs.token }}
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.version.outputs.tag }}
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p SHA256SUMS -O "$RUNNER_TEMP/SHA256SUMS"
+          sum() { awk -v f="tenbri-$VERSION-$1.tar.gz" '$2 == f { print $1 }' "$RUNNER_TEMP/SHA256SUMS"; }
+          mkdir -p Formula
+          cat > Formula/tenbri.rb <<RUBY
+          # Written by tenbri/tenbri's release.yml for $TAG. Do not edit by hand.
+          class Tenbri < Formula
+            desc "Flight recorder for AI agents: every decision signed, chained and provable"
+            homepage "https://github.com/$GITHUB_REPOSITORY"
+            version "$VERSION"
+            license "Apache-2.0"
+
+            on_macos do
+              on_arm do
+                url "$URL/tenbri-$VERSION-aarch64-apple-darwin.tar.gz"
+                sha256 "$(sum aarch64-apple-darwin)"
+              end
+              on_intel do
+                url "$URL/tenbri-$VERSION-x86_64-apple-darwin.tar.gz"
+                sha256 "$(sum x86_64-apple-darwin)"
+              end
+            end
+            on_linux do
+              on_arm do
+                url "$URL/tenbri-$VERSION-aarch64-unknown-linux-musl.tar.gz"
+                sha256 "$(sum aarch64-unknown-linux-musl)"
+              end
+              on_intel do
+                url "$URL/tenbri-$VERSION-x86_64-unknown-linux-musl.tar.gz"
+                sha256 "$(sum x86_64-unknown-linux-musl)"
+              end
+            end
+
+            def install
+              bin.install "tenbri", "tenbrid"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/tenbri --version")
+            end
+          end
+          RUBY
+          if grep -q 'sha256 ""' Formula/tenbri.rb; then echo "::error::SHA256SUMS lacks an archive the formula needs."; exit 1; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/tenbri.rb
+          git diff --cached --quiet && { echo "The formula is already at $VERSION."; exit 0; }
+          git commit -m "tenbri $VERSION"
+          git push
+
+  crates:
+    needs: version
+    if: needs.version.outputs.crates == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      # The first publish of a crate needs a token (crates.io limits how fast new crates appear, and
+      # a trusted publisher can only be set up for a crate that exists); trusted publishing after.
+      - id: auth
+        if: vars.CRATES_IO_TRUSTED_PUBLISHING == 'true'
+        uses: rust-lang/crates-io-auth-action@v1
+      - env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          # Crates already at this version are left out, so a failed run can be repeated.
+          exclude=() todo=0
+          for name in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.publish == null) | .name'); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -A "tenbri-release (github.com/$GITHUB_REPOSITORY)" \
+              "https://crates.io/api/v1/crates/$name/$VERSION")
+            if [ "$code" = 200 ]; then echo "$name@$VERSION is already on crates.io."; exclude+=(--exclude "$name"); else todo=1; fi
+          done
+          [ "$todo" = 1 ] || exit 0
+          cargo publish --workspace "${exclude[@]}"
+
+  wheels:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: manylinux-x86_64, runner: ubuntu-24.04, target: x86_64, manylinux: auto }
+          - { name: manylinux-aarch64, runner: ubuntu-24.04-arm, target: aarch64, manylinux: auto }
+          - { name: musllinux-x86_64, runner: ubuntu-24.04, target: x86_64-unknown-linux-musl, manylinux: musllinux_1_2 }
+          - { name: musllinux-aarch64, runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, manylinux: musllinux_1_2 }
+          - { name: macos-x86_64, runner: macos-15-intel, target: x86_64, manylinux: "off" }
+          - { name: macos-arm64, runner: macos-15, target: aarch64, manylinux: "off" }
+          - { name: windows-x86_64, runner: windows-2025, target: x64, manylinux: "off" }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: bindings/python
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --out dist
+      - name: The wheel carries the tag's version
+        shell: bash
+        working-directory: bindings/python
+        env:
+          PEP440: ${{ needs.version.outputs.pep440 }}
+        run: |
+          ls dist
+          for w in dist/*.whl; do
+            case "$w" in *"-$PEP440-"*) ;; *) echo "::error::$w is not version $PEP440"; exit 1 ;; esac
+          done
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: bindings/python/dist/*
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.name }}
+          path: bindings/python/dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  sdist:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: bindings/python
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-sdist
+          path: bindings/python/dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  pypi:
+    needs: [version, wheels, sdist]
+    if: needs.version.outputs.pypi == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+      # With no PYPI_API_TOKEN, the action uses the trusted publisher. A version PyPI already has
+      # is skipped, so a failed run can be repeated.
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+
+  node-addons:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux addons link against napi-rs's cross toolchains (glibc 2.17), so they load on old
+          # distributions too; built on ubuntu-24.04 they would need glibc 2.39.
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04, cross: "--use-napi-cross" }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04, cross: "--use-napi-cross" }
+          # musl (Alpine) addons are cross-linked with zig (cargo-zigbuild, napi build -x).
+          - { target: x86_64-unknown-linux-musl, runner: ubuntu-24.04, cross: "-x" }
+          - { target: aarch64-unknown-linux-musl, runner: ubuntu-24.04, cross: "-x" }
+          - { target: x86_64-apple-darwin, runner: macos-15-intel, cross: "" }
+          - { target: aarch64-apple-darwin, runner: macos-15, cross: "" }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, cross: "" }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: bindings/node
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: bindings/node/package-lock.json
+      - if: matrix.cross == '-x'
+        uses: mlugg/setup-zig@v2
+      - if: matrix.cross == '-x'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - run: npm ci
+      - run: npx napi build --platform --release --target "$TARGET" ${CROSS:+"$CROSS"}
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          CROSS: ${{ matrix.cross }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: node-${{ matrix.target }}
+          path: bindings/node/*.node
+          if-no-files-found: error
+          retention-days: 1
+
+  npm:
+    needs: [version, node-addons]
+    if: needs.version.outputs.npm == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      VERSION: ${{ needs.version.outputs.version }}
+      NPM_TAG: ${{ needs.version.outputs.npm-tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      # Node 24's npm does trusted publishing (11.5 and later).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v8
+        with:
+          path: bindings/node/artifacts
+          pattern: node-*
+          merge-multiple: true
+      - name: Version the packages
+        run: |
+          # wasm-pack leaves a .gitignore of * in pkg/, which would keep the files out of the package.
+          (cd bindings/wasm && wasm-pack build --release --target web --out-dir pkg --no-pack && rm -f pkg/.gitignore)
+          cd bindings/node
+          npm ci
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          # The addons into npm/<platform>/, every npm/*/package.json at the version, and the main
+          # package's optionalDependencies pointing at them.
+          npx napi artifacts --output-dir artifacts
+          npx napi version
+          npx napi pre-publish -t npm --skip-optional-publish
+      - name: Publish
+        run: |
+          prerelease=false; case "$VERSION" in *-*) prerelease=true ;; esac
+          # The per-platform packages before the package that depends on them.
+          for dir in bindings/node/npm/* bindings/node bindings/wasm; do
+            name=$(jq -r .name "$dir/package.json")
+            if [ "$(npm view "$name@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+              echo "$name@$VERSION is already on npm."
+            else
+              (cd "$dir" && npm publish --provenance --access public --tag "$NPM_TAG")
+            fi
+            # npm points latest at a package's first publish, a pre-release included. Until 0.1.0,
+            # latest goes back to the 0.0.0 placeholder that reserved the name.
+            if [ "$prerelease" = true ] && [[ "$(npm view "$name" dist-tags.latest 2>/dev/null)" == *-* ]]; then
+              if [ -n "$NODE_AUTH_TOKEN" ] && [ "$(npm view "$name@0.0.0" version 2>/dev/null)" = 0.0.0 ]; then
+                npm dist-tag add "$name@0.0.0" latest
+              else
+                echo "::warning::$name's latest points at a pre-release. Move it with npm dist-tag (needs NPM_TOKEN and a 0.0.0 placeholder)."
+              fi
+            fi
+          done
+
+  # One image per architecture, on its own hardware, from the static binary the release ships,
+  # pushed by digest only.
+  image:
+    needs: [version, binaries]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux/amd64, arch: amd64, target: x86_64-unknown-linux-musl, runner: ubuntu-24.04 }
+          - { platform: linux/arm64, arch: arm64, target: aarch64-unknown-linux-musl, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    env:
+      NAME: ghcr.io/${{ github.repository }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: bin-${{ matrix.target }}
+          path: ${{ runner.temp }}/bin
+      - env:
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p "dist/$ARCH"
+          tar -xzf "$RUNNER_TEMP/bin/tenbri-$VERSION-$TARGET.tar.gz" -C "$RUNNER_TEMP"
+          cp "$RUNNER_TEMP/tenbri-$VERSION-$TARGET/tenbri" "$RUNNER_TEMP/tenbri-$VERSION-$TARGET/tenbrid" "dist/$ARCH/"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.NAME }}
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.NAME }},push-by-digest=true,name-canonical=true,push=true
+      - name: Keep the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Both architectures under one name, with the release's tags.
+  image-publish:
+    needs: [version, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      NAME: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # A pre-release gets its exact tag only: semver's {{major}}.{{minor}} would also match it.
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.NAME }}
+          tags: |
+            type=raw,value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.version }},enable=${{ needs.version.outputs.minor }}
+            type=semver,pattern={{major}},value=${{ needs.version.outputs.version }},enable=${{ needs.version.outputs.major }}
+            type=raw,value=latest,enable=${{ needs.version.outputs.latest }}
+          flavor: latest=false
+      - id: join
+        name: One image, both architectures
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<<"$DOCKER_METADATA_OUTPUT_JSON")
+          # shellcheck disable=SC2086,SC2046 # one -t per tag, one name per digest
+          docker buildx imagetools create $tags $(printf "$NAME@sha256:%s " *)
+          docker buildx imagetools inspect "$NAME:$VERSION"
+          echo "digest=$(docker buildx imagetools inspect "$NAME:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ env.NAME }}
+          subject-digest: ${{ steps.join.outputs.digest }}
+          push-to-registry: true

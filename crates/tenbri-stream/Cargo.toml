@@ -1,0 +1,12 @@
+[package]
+name = "tenbri-stream"
+description = "Delivery of verified Tenbri entries to webhooks, OTLP logs and Kafka."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,53 @@
+# The store against the real object stores the docs call Stable, every night: Cloudflare R2 and AWS
+# S3, with repository secrets. Pull requests test against MinIO (ci.yml); these catch what only a
+# provider does (its conditional-write answers, its consistency, its error codes). Each store is
+# skipped until its secrets exist. Long fuzz runs join this file when the fuzz targets exist.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "37 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  storage:
+    strategy:
+      fail-fast: false
+      matrix:
+        store: [r2, s3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # One set of secrets per store, named TENBRI_<STORE>_*.
+      TENBRI_TEST_S3_ENDPOINT: ${{ matrix.store == 'r2' && secrets.TENBRI_R2_ENDPOINT || secrets.TENBRI_S3_ENDPOINT }}
+      TENBRI_TEST_S3_REGION: ${{ matrix.store == 'r2' && 'auto' || secrets.TENBRI_S3_REGION }}
+      TENBRI_TEST_S3_BUCKET: ${{ matrix.store == 'r2' && secrets.TENBRI_R2_BUCKET || secrets.TENBRI_S3_BUCKET }}
+      TENBRI_TEST_S3_ACCESS_KEY_ID: ${{ matrix.store == 'r2' && secrets.TENBRI_R2_ACCESS_KEY_ID || secrets.TENBRI_S3_ACCESS_KEY_ID }}
+      TENBRI_TEST_S3_SECRET_ACCESS_KEY: ${{ matrix.store == 'r2' && secrets.TENBRI_R2_SECRET_ACCESS_KEY || secrets.TENBRI_S3_SECRET_ACCESS_KEY }}
+    steps:
+      - id: ready
+        env:
+          STORE: ${{ matrix.store }}
+        run: |
+          if [ -z "$TENBRI_TEST_S3_BUCKET" ] || [ -z "$TENBRI_TEST_S3_ACCESS_KEY_ID" ]; then
+            echo "::notice::No $STORE secrets yet (nightly.yml's header): skipped."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.ready.outputs.run == 'true'
+        uses: actions/checkout@v7
+      - if: steps.ready.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+      - if: steps.ready.outputs.run == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - if: steps.ready.outputs.run == 'true'
+        run: cargo nextest run -p tenbri-store -p tenbri-writer --locked

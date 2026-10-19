@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose something Tenbri should do.
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A change to what is written to a stream, how it is signed or how it verifies is a format
+        change: use the "Format or spec change" template instead.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What can't you do today? Describe the situation, not the solution.
+    validations: { required: true }
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+    validations: { required: true }
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried or considered instead

@@ -1,0 +1,52 @@
+name: Bug report
+description: Something behaves differently from how it is documented.
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A stream that verifies when it should not, or a signature or proof that can be forged, is a
+        vulnerability: report it privately ([SECURITY.md](https://github.com/tenbri/tenbri/blob/main/SECURITY.md)).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the exact error, the command or call, and tenbri verify's output if it is about a stream.
+    validations: { required: true }
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. tenbri init ./log
+        2. tenbri append ./log --action issue_refund ...
+        3. tenbri verify ./log reports ...
+    validations: { required: true }
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations: { required: true }
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: tenbri --version, or the crate, wheel or npm package version.
+    validations: { required: true }
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      multiple: true
+      options: [Rust crate, CLI, tenbrid, Python, Node, WASM verifier, An adapter]
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS and architecture, Rust, Python or Node version, store (local disk, S3, R2, MinIO, GCS, Azure), index backend.

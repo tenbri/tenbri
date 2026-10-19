@@ -1,0 +1,18 @@
+[package]
+name = "tenbri-cli"
+description = "The tenbri command-line tool."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "tenbri"
+path = "src/main.rs"
+# The facade crate is also called tenbri: one page in cargo doc, not two.
+doc = false
+
+[lints]
+workspace = true

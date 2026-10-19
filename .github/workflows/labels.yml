@@ -1,0 +1,24 @@
+# The repository's labels follow .github/labels.yml: a push to main that changes it, or a run by hand.
+# Labels missing from the file are kept, never deleted.
+name: Labels
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/labels.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: crazy-max/ghaction-github-labeler@v6
+        with:
+          yaml-file: .github/labels.yml
+          skip-delete: true

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Tenbri: third-party licenses</title></head>
+<body>
+<h1>Third-party licenses</h1>
+<p>Tenbri is Apache-2.0. It includes the following crates, under these licenses.</p>
+<ul>
+{{#each overview}}<li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+{{/each}}</ul>
+{{#each licenses}}
+<h2 id="{{id}}">{{name}}</h2>
+<p>Used by:</p>
+<ul>{{#each used_by}}<li><a href="{{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}">{{crate.name}} {{crate.version}}</a></li>{{/each}}</ul>
+<pre>{{text}}</pre>
+{{/each}}
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "@tenbri/wasm",
+  "version": "0.0.0",
+  "description": "The Tenbri verifier for browsers, compiled to WebAssembly.",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/tenbri/tenbri.git", "directory": "bindings/wasm" },
+  "type": "module",
+  "main": "pkg/tenbri_wasm.js",
+  "types": "pkg/tenbri_wasm.d.ts",
+  "files": ["pkg/tenbri_wasm.js", "pkg/tenbri_wasm.d.ts", "pkg/tenbri_wasm_bg.wasm", "pkg/tenbri_wasm_bg.wasm.d.ts"],
+  "scripts": {
+    "build": "wasm-pack build --release --target web --out-dir pkg --no-pack"
+  }
+}

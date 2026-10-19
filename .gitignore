@@ -1,0 +1,8 @@
+/target
+node_modules/
+*.node
+/bindings/python/dist
+/bindings/wasm/pkg
+__pycache__/
+.venv/
+*.cdx.json

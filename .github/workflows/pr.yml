@@ -1,0 +1,75 @@
+# Pull request hygiene, for the maintainers' pull requests and everyone else's:
+# - area labels from the files touched (.github/labeler.yml);
+# - every commit's subject is a Conventional Commit with no em dash (CONTRIBUTING.md), since the
+#   changelog and the next version are made from them (release-please.yml); a subject over 72
+#   characters is a warning, since the changelog shows it whole;
+# - every commit carries the Developer Certificate of Origin: a Signed-off-by line naming its
+#   author's email (git commit -s). Tenbri is Apache-2.0 and contributions come in under the same
+#   license, so there is no CLA to sign, only this line.
+#
+# pull_request_target, so a fork's pull request can be labeled: it runs the base branch's workflow
+# and never checks out or runs the pull request's code. Titles, bodies and messages are read from
+# the API into variables, never pasted into a script.
+name: Pull request
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/labeler@v7
+        with:
+          sync-labels: false
+
+  commits:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Conventional Commits and sign-off
+        run: |
+          # Merges, reverts and bots' commits (Dependabot, Release Please) are not held to it.
+          pattern='^(feat|fix|perf|refactor|docs|test|build|ci|chore|style|revert)(\([a-z0-9./_-]+\))?!?: .+'
+          bad=0
+          # shellcheck disable=SC2016 # $email is jq's, not the shell's
+          while IFS=$'\t' read -r sha login email signed subject; do
+            case "$subject" in "Merge "*|"Revert \""*) continue ;; esac
+            case "$login" in *"[bot]") continue ;; esac
+            if ! grep -qE "$pattern" <<<"$subject"; then
+              echo "::error::${sha::7} \"$subject\" is not a Conventional Commit (feat:, fix:, docs:, refactor:, chore:...)."
+              bad=1
+            elif grep -q $'\xe2\x80\x94' <<<"$subject"; then
+              echo "::error::${sha::7} \"$subject\" has an em dash; use ' - ', a comma or a colon."
+              bad=1
+            elif [ "${#subject}" -gt 72 ]; then
+              echo "::warning::${sha::7} \"$subject\" is ${#subject} characters; the changelog reads best under 72."
+            fi
+            if [ "$signed" != true ]; then
+              echo "::error::${sha::7} has no \"Signed-off-by: ... <$email>\" line (DCO, CONTRIBUTING.md#developer-certificate-of-origin)."
+              bad=1
+            fi
+          done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" \
+                     --jq '.[] | .commit.author.email as $email
+                           | [.sha, (.author.login // ""), $email,
+                              (.commit.message | split("\n")
+                                | any(startswith("Signed-off-by: ") and endswith("<" + $email + ">"))),
+                              (.commit.message | split("\n")[0])] | @tsv')
+          if [ "$bad" = 1 ]; then
+            echo "Reword or sign them (git rebase -i, or git rebase --signoff for the sign-off) and push again."
+            echo "The changelog is written from these subjects."
+            exit 1
+          fi

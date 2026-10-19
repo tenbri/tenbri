@@ -1,0 +1,155 @@
+# Every label the repository uses, kept here and synced by .github/workflows/labels.yml.
+# Labels made by hand and missing here stay (skip-delete): add them here to keep them.
+# Dependabot's (dependencies, rust, python, javascript, github_actions) and release-please's
+# (autorelease: pending, autorelease: tagged) are listed so they keep their colors.
+
+# What it is. The issue templates set bug and enhancement.
+- name: bug
+  color: "d73a4a"
+  description: Behaves differently from how it is documented
+- name: enhancement
+  color: "a2eeef"
+  description: Something new, or something better
+- name: documentation
+  color: "0075ca"
+  description: Docs, README, decisions
+- name: security
+  color: "b60205"
+  description: A hardening change (report vulnerabilities privately, see SECURITY.md)
+- name: breaking
+  color: "000000"
+  description: Breaks a 0.x API (a feat!) or tenbrid's API contract
+- name: format
+  color: "5319e7"
+  description: Changes the log format or the spec (needs a new format version and test vectors)
+- name: experimental
+  color: "fef2c0"
+  description: Behind a Cargo feature or an experimental module; may change in any minor
+- name: dependencies
+  color: "0366d6"
+  description: Dependabot
+- name: rust
+  color: "dea584"
+  description: Dependabot, Cargo
+- name: python
+  color: "3572a5"
+  description: Dependabot, pip
+- name: javascript
+  color: "f1e05a"
+  description: Dependabot, npm
+- name: github_actions
+  color: "000000"
+  description: Dependabot, GitHub Actions
+
+# Where it is. Pull requests get these from the files they touch (.github/labeler.yml).
+- name: "area: core"
+  color: "c5def5"
+  description: Entry types, canonical JSON, hashing, signing (tenbri-core, the tenbri facade)
+- name: "area: merkle"
+  color: "c5def5"
+  description: Merkle tree, proofs, checkpoints, C2SP tiles
+- name: "area: keys"
+  color: "c5def5"
+  description: Stream and session keys, rotation, revocation
+- name: "area: writer"
+  color: "c5def5"
+  description: Batching, the write protocol, HEAD, lanes and groups
+- name: "area: store"
+  color: "c5def5"
+  description: Local disk and object stores
+- name: "area: crypt"
+  color: "c5def5"
+  description: Blob encryption, per-subject keys, erasure
+- name: "area: index"
+  color: "c5def5"
+  description: The derived index: SQLite, Parquet, Iceberg
+- name: "area: anchor"
+  color: "c5def5"
+  description: RFC 3161 timestamps, Rekor, witnesses
+- name: "area: export"
+  color: "c5def5"
+  description: OpenLineage, W3C PROV, streaming out
+- name: "area: macros"
+  color: "c5def5"
+  description: The #[tenbri::decision] macro
+- name: "area: cli"
+  color: "c5def5"
+  description: The tenbri CLI, tenbrid and the container
+- name: "area: mcp"
+  color: "c5def5"
+  description: The read-only MCP server
+- name: "area: proxy"
+  color: "c5def5"
+  description: The MCP proxy
+- name: "area: otlp"
+  color: "c5def5"
+  description: OpenTelemetry ingest and correlation
+- name: "area: python"
+  color: "c5def5"
+  description: The Python package
+- name: "area: node"
+  color: "c5def5"
+  description: The npm package
+- name: "area: wasm"
+  color: "c5def5"
+  description: The WASM verifier
+- name: "area: adapters"
+  color: "c5def5"
+  description: Framework adapters (Claude Agent SDK, OpenAI Agents SDK, LangGraph...)
+- name: "area: spec"
+  color: "c5def5"
+  description: The format spec and test vectors
+- name: "area: docs"
+  color: "c5def5"
+  description: Docs, README, guides
+- name: "area: ci"
+  color: "c5def5"
+  description: Workflows, releases, supply-chain config
+
+# Where it stands. New issues start at needs-triage; .github/workflows/triage.yml moves needs-info.
+- name: needs-triage
+  color: "fbca04"
+  description: Not looked at yet
+- name: needs-info
+  color: "fef2c0"
+  description: Waiting on the author; closed after 14 days without an answer
+- name: accepted
+  color: "0e8a16"
+  description: Will be done; a pull request is welcome
+- name: deferred
+  color: "d4c5f9"
+  description: Not now; the thread says what would bring it in
+- name: stale
+  color: "ededed"
+  description: At needs-info with no answer; closes in four days
+- name: blocked
+  color: "e99695"
+  description: Waits on something else, linked in the thread
+- name: duplicate
+  color: "cfd3d7"
+  description: Already reported
+- name: wontfix
+  color: "ffffff"
+  description: Out of scope (README.md's non-goals)
+- name: question
+  color: "d876e3"
+  description: Better in Discussions
+
+# For newcomers.
+- name: good first issue
+  color: "7057ff"
+  description: Small, well described, and a good way in
+- name: help wanted
+  color: "008672"
+  description: Accepted, and nobody is on it
+
+# Releases (release-please's own).
+- name: "autorelease: pending"
+  color: "ededed"
+  description: The release pull request, not merged yet
+- name: "autorelease: tagged"
+  color: "ededed"
+  description: Released
+- name: digest
+  color: "ededed"
+  description: The weekly maintainer digest

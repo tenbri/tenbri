@@ -1,0 +1,86 @@
+# Area labels a pull request gets from the files it touches (actions/labeler, run by pr.yml).
+# The labels themselves are in labels.yml.
+
+"area: core":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-core/**", "crates/tenbri/**"]
+
+"area: merkle":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-merkle/**", "crates/tenbri-tiles/**"]
+
+"area: keys":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-keys/**"]
+
+"area: writer":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-writer/**"]
+
+"area: store":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-store/**"]
+
+"area: crypt":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-crypt/**"]
+
+"area: index":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-index/**"]
+
+"area: anchor":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-anchor/**"]
+
+"area: export":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-export/**", "crates/tenbri-stream/**"]
+
+"area: macros":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-macros/**"]
+
+"area: cli":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-cli/**", "crates/tenbri-server/**", "crates/tenbri-schema/**", "contract/**", "Dockerfile"]
+
+"area: mcp":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-mcp/**"]
+
+"area: proxy":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-proxy/**"]
+
+"area: otlp":
+  - changed-files:
+      - any-glob-to-any-file: ["crates/tenbri-otlp/**"]
+
+"area: python":
+  - changed-files:
+      - any-glob-to-any-file: ["bindings/python/**"]
+
+"area: node":
+  - changed-files:
+      - any-glob-to-any-file: ["bindings/node/**"]
+
+"area: wasm":
+  - changed-files:
+      - any-glob-to-any-file: ["bindings/wasm/**"]
+
+"area: adapters":
+  - changed-files:
+      - any-glob-to-any-file: ["adapters/**", "**/adapters/**"]
+
+"area: spec":
+  - changed-files:
+      - any-glob-to-any-file: ["spec/**", "crates/tenbri-testkit/**"]
+
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file: ["docs/**", "*.md"]
+
+"area: ci":
+  - changed-files:
+      - any-glob-to-any-file: [".github/**", "deny.toml", "about.*", "release-please-config.json", ".release-please-manifest.json"]

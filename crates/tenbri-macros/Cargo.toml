@@ -1,0 +1,15 @@
+[package]
+name = "tenbri-macros"
+description = "The #[tenbri::decision] attribute macro."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true

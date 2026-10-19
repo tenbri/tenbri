@@ -1,0 +1,12 @@
+[package]
+name = "tenbri-store"
+description = "Tenbri store trait (get, put-if-absent, compare-and-swap) for local disk and object stores."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true

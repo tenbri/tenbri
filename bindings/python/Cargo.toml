@@ -1,0 +1,20 @@
+[package]
+name = "tenbri-py"
+description = "Python bindings for Tenbri."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# Ships as the tenbri wheel on PyPI, not as a crate.
+publish = false
+
+[lib]
+name = "tenbri_py"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# abi3: one wheel per platform for every Python from 3.10. extension-module is turned on by
+# maturin (pyproject.toml), so cargo test still links libpython.
+pyo3 = { version = "0.30", features = ["abi3-py310"] }

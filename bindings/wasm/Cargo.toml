@@ -1,0 +1,17 @@
+[package]
+name = "tenbri-wasm"
+description = "The Tenbri verifier for browsers, compiled to WebAssembly."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# Ships as @tenbri/wasm on npm, not as a crate.
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"

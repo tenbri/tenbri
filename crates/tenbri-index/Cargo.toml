@@ -1,0 +1,12 @@
+[package]
+name = "tenbri-index"
+description = "Tenbri derived index (SQLite, Parquet, Iceberg): rebuild, query, as-of."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true

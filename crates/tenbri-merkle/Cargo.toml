@@ -1,0 +1,12 @@
+[package]
+name = "tenbri-merkle"
+description = "RFC 6962 Merkle tree, inclusion and consistency proofs, C2SP checkpoints for Tenbri."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true

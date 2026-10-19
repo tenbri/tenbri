@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "bindings/python", "bindings/node", "bindings/wasm"]
+
+# One version for every crate, the Python package and the npm packages. Release Please moves it
+# (release-please-config.json); nobody edits it by hand.
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+# The MSRV moves at most once per minor release, never in a patch (CONTRIBUTING.md).
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/tenbri/tenbri"
+homepage = "https://github.com/tenbri/tenbri"
+
+# Tenbri's own crates have no unsafe code; the binding crates (bindings/*) do not inherit this,
+# because pyo3, napi and wasm-bindgen generate unsafe code.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

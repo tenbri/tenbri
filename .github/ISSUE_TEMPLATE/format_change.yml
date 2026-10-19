@@ -1,0 +1,59 @@
+name: Format or spec change
+description: Change what a stream holds, how it is signed, or how it verifies (spec/).
+title: "spec: "
+labels: [format, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every release reads and verifies every format version it ever accepted
+        ([spec/README.md](https://github.com/tenbri/tenbri/blob/main/spec/README.md)). So fields are only
+        added in a new format version, v1 readers reject unknown top-level fields, and experimental
+        data goes under `ext`. A change here needs two maintainer approvals once there are two.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What can't the format express or prove today?
+    validations: { required: true }
+
+  - type: textarea
+    id: change
+    attributes:
+      label: The change
+      description: Fields, canonical bytes, signatures, checkpoints, receipts or links, as precisely as you can.
+    validations: { required: true }
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Under ext (experimental, no new format version)
+        - Additive (a new format version that v1 streams can move to)
+        - Breaking (a new stream linked to the last checkpoint of the old one)
+        - Clarification of the spec text only
+    validations: { required: true }
+
+  - type: textarea
+    id: compat
+    attributes:
+      label: Compatibility
+      description: What an older reader and verifier do with the new data, and what a new verifier does with old streams.
+    validations: { required: true }
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: What an attacker with bucket access, a stolen key, or a malicious writer could do differently.
+    validations: { required: true }
+
+  - type: checkboxes
+    id: vectors
+    attributes:
+      label: Test vectors
+      options:
+        - label: The pull request will add conformance vectors under spec/vectors/ for every case it introduces.
+          required: true

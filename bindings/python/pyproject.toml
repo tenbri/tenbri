@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "tenbri"
+description = "A flight recorder for AI agents: every decision signed, chained and provable."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+# The version is the Cargo workspace's, read by maturin: Release Please moves it there only.
+dynamic = ["version"]
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Development Status :: 2 - Pre-Alpha",
+]
+
+[project.urls]
+Repository = "https://github.com/tenbri/tenbri"
+
+[tool.maturin]
+module-name = "tenbri"
+features = ["pyo3/extension-module"]

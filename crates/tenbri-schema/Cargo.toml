@@ -1,0 +1,12 @@
+[package]
+name = "tenbri-schema"
+description = "Tenbri action schemas from tenbri.toml, validated at write time."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true

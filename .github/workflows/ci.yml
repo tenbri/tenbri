@@ -1,0 +1,224 @@
+# Every pull request and every push to main, so main always builds, passes and can be released:
+# - check: rustfmt, clippy with warnings as errors, rustdoc with warnings as errors;
+# - test: cargo nextest on Linux, macOS and Windows, the platforms the CLI ships for;
+# - msrv: build and test on the pinned minimum Rust (Cargo.toml's rust-version, 1.85);
+# - deny and audit: licenses, advisories, duplicate and banned crates (deny.toml), and RustSec;
+# - semver: cargo-semver-checks against the last release on crates.io;
+# - storage: the store against MinIO, the object store anyone can run, as Artbucket's CI runs Postgres;
+# - python, node, wasm: each binding builds and its package imports, as release.yml builds it;
+# - contract: tenbrid's OpenAPI and protobuf files hold against the base branch, as Artbucket
+#   holds its v1 contract.
+# R2 and S3 run nightly (nightly.yml). Still to come, with the code they test: conformance vectors
+# through all four bindings, fuzz targets (60 seconds here, long runs nightly), writer crash tests.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo doc --workspace --no-deps --locked
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      # The Python binding's tests link libpython; setup-python's builds ship it on every OS.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: cargo nextest run --workspace --locked
+      # nextest runs no doctests.
+      - run: cargo test --workspace --doc --locked
+
+  msrv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: Swatinem/rust-cache@v2
+      # --locked: Cargo.lock is resolved for rust-version (resolver 3), so this tests what users get.
+      - run: cargo test --workspace --locked
+
+  deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check all
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - run: cargo audit
+
+  semver:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Nothing is on crates.io before 0.1.0-alpha.1, so there is no baseline to compare with.
+    # ponytail: allowed to fail until then; delete this line once alpha.1 is published.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+
+  storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TENBRI_TEST_S3_ENDPOINT: http://localhost:9000
+      TENBRI_TEST_S3_REGION: us-east-1
+      TENBRI_TEST_S3_BUCKET: tenbri
+      TENBRI_TEST_S3_ACCESS_KEY_ID: tenbri
+      TENBRI_TEST_S3_SECRET_ACCESS_KEY: tenbri-ci-only
+    steps:
+      - uses: actions/checkout@v7
+      # MinIO, not a services: entry, because a service container can't be given its command
+      # (server /data). The tests make their own bucket.
+      - name: MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER="$TENBRI_TEST_S3_ACCESS_KEY_ID" \
+            -e MINIO_ROOT_PASSWORD="$TENBRI_TEST_S3_SECRET_ACCESS_KEY" \
+            minio/minio:latest server /data
+          for _ in $(seq 30); do curl -sf -o /dev/null http://localhost:9000/minio/health/ready && exit 0; sleep 1; done
+          docker logs minio
+          exit 1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: cargo nextest run -p tenbri-store -p tenbri-writer --locked
+
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10" # the oldest the abi3 wheel promises
+      - uses: Swatinem/rust-cache@v2
+      - run: python -m pip install ./bindings/python
+      - run: python bindings/python/tests/test_import.py
+
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: bindings/node
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: bindings/node/package-lock.json
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - run: npx napi build --platform
+      - name: The committed loader and types match the code
+        run: |
+          if ! git diff --exit-code -- index.js index.d.ts; then
+            echo "::error::index.js or index.d.ts is out of date. Run npx napi build --platform in bindings/node and commit them."
+            exit 1
+          fi
+      - run: npm test
+
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - run: wasm-pack build --release --target web --out-dir pkg --no-pack
+        working-directory: bindings/wasm
+
+  # tenbrid's API is a frozen contract per major version: nothing a client of the base branch
+  # relies on may change. contract/ holds openapi.v1.yaml and proto/; until tenbri-server writes
+  # them, the base branch has none and this passes.
+  contract:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: OpenAPI holds against the base branch
+        run: |
+          if ! git cat-file -e "origin/$BASE:contract/openapi.v1.yaml" 2>/dev/null; then
+            echo "No contract/openapi.v1.yaml on $BASE yet: nothing to hold."
+            exit 0
+          fi
+          git show "origin/$BASE:contract/openapi.v1.yaml" > "$RUNNER_TEMP/base.yaml"
+          docker run --rm -v "$RUNNER_TEMP:/base" -v "$PWD/contract:/head" tufin/oasdiff \
+            breaking /base/base.yaml /head/openapi.v1.yaml --fail-on ERR
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+      - name: Protobuf holds against the base branch
+        run: |
+          if ! git cat-file -e "origin/$BASE:contract/proto" 2>/dev/null; then
+            echo "No contract/proto on $BASE yet: nothing to hold."
+            exit 0
+          fi
+          buf breaking contract/proto --against ".git#branch=origin/$BASE,subdir=contract/proto"

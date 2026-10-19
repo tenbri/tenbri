@@ -1,0 +1,40 @@
+{
+  "name": "tenbri",
+  "version": "0.0.0",
+  "description": "A flight recorder for AI agents: every decision signed, chained and provable.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tenbri/tenbri.git",
+    "directory": "bindings/node"
+  },
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "engines": {
+    "node": ">= 20"
+  },
+  "napi": {
+    "binaryName": "tenbri",
+    "packageName": "@tenbri/node",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-musl",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0"
+  }
+}

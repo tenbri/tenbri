@@ -1,0 +1,12 @@
+[package]
+name = "tenbri-keys"
+description = "Tenbri stream keys, session-key certificates, rotation and revocation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true

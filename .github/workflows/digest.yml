@@ -1,0 +1,96 @@
+# A weekly maintainer digest: one issue, labeled digest, rewritten every Monday, so the state of the
+# project is one page to read instead of five to visit. Pin it once. It lists what is unreleased,
+# pull requests and issues waiting on the maintainer (outside contributors first), what to triage,
+# and branches already merged that can go.
+name: Digest
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      R: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Write the digest
+        run: |
+          now=$(date -u +%s)
+          age() { echo $(( (now - $(date -u -d "$1" +%s)) / 86400 ))d; }
+          last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' origin/main 2>/dev/null || true)
+          {
+            echo "_Rewritten every Monday by .github/workflows/digest.yml. Last run $(date -u +%F)._"
+            echo
+            echo "## Unreleased"
+            if [ -n "$last" ]; then
+              range="$last..origin/main"
+              n=$(git log --no-merges --format=%s "$range" | wc -l)
+              feats=$(git log --no-merges --format=%s "$range" | grep -cE '^feat(\(.*\))?!?:' || true)
+              fixes=$(git log --no-merges --format=%s "$range" | grep -cE '^fix(\(.*\))?!?:' || true)
+              since=$(git log -1 --format=%cI "$last")
+              echo "$n commits since **$last** ($(age "$since") ago): $feats features, $fixes fixes."
+            fi
+            rel=$(gh pr list -R "$R" --label 'autorelease: pending' --json number --jq '.[0].number // empty')
+            [ -n "$rel" ] && echo "Release pull request: #$rel. Merge it to ship."
+            echo
+
+            echo "## Pull requests waiting"
+            # Oldest first; from outside the collaborators marked, since they wait on you alone.
+            gh api --paginate "repos/$R/pulls?state=open&sort=created&direction=asc" \
+              --jq '.[] | select(.draft | not)
+                    | "- \(if (.author_association | IN("OWNER","MEMBER","COLLABORATOR")) or (.user.type == "Bot") then "" else "**Community** " end)#\(.number) (@\(.user.login), opened \(.created_at[:10]))"' \
+              | grep . || echo "None."
+            echo
+
+            echo "## Issues to triage"
+            gh issue list -R "$R" --state open --label needs-triage --limit 100 --json number,createdAt \
+              --jq 'sort_by(.createdAt) | .[] | "- #\(.number) (opened \(.createdAt[:10]))"' | grep . || echo "None."
+            echo
+
+            echo "## Issues no maintainer has answered"
+            gh issue list -R "$R" --state open --limit 200 --json number,author,comments,labels \
+              --jq '.[] | select(.labels | map(.name) | index("digest") | not)
+                    | select([.comments[] | select(.authorAssociation | IN("OWNER","MEMBER","COLLABORATOR"))] | length == 0)
+                    | "- #\(.number) (@\(.author.login))"' | grep . || echo "None."
+            echo
+
+            echo "## Help wanted"
+            echo "$(gh issue list -R "$R" --state open --label 'help wanted' --limit 200 --json number --jq length) open. Keep a few, small and well described, before launch."
+            echo
+
+            echo "## Branches merged into main"
+            # Not the bots' branches (Dependabot's, Release Please's).
+            merged=$(git branch -r --merged origin/main | sed 's|^ *origin/||' | grep -vE '^(HEAD|main)( |$)|^(dependabot|release-please)' || true)
+            if [ -n "$merged" ]; then
+              echo "$(wc -l <<<"$merged") can be deleted (turn on Settings > General > Automatically delete head branches to stop the pile):"
+              echo
+              echo '```sh'
+              xargs -n 20 echo git push origin --delete <<<"$merged"
+              echo '```'
+            else
+              echo "None."
+            fi
+          } > digest.md
+
+      - name: Post it
+        run: |
+          gh label create digest -R "$R" --color ededed --description "The weekly maintainer digest" 2>/dev/null || true
+          n=$(gh issue list -R "$R" --label digest --state open --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue edit "$n" -R "$R" --body-file digest.md
+          else
+            gh issue create -R "$R" --title "Maintainer digest" --label digest --body-file digest.md
+          fi

@@ -1,0 +1,6 @@
+# Every change is reviewed by a maintainer. GOVERNANCE.md says who decides what.
+* @aminekaabachi
+
+# The format and its test vectors: once there are two maintainers, both approve a change here
+# (GOVERNANCE.md#the-format). Add the second one to this line and require code owner review.
+/spec/ @aminekaabachi

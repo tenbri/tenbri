@@ -1,0 +1,27 @@
+{
+  "name": "@tenbri/node-linux-x64-musl",
+  "version": "0.0.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "tenbri.linux-x64-musl.node",
+  "files": [
+    "tenbri.linux-x64-musl.node"
+  ],
+  "description": "A flight recorder for AI agents: every decision signed, chained and provable.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tenbri/tenbri.git",
+    "directory": "bindings/node"
+  },
+  "os": [
+    "linux"
+  ],
+  "libc": [
+    "musl"
+  ]
+}
