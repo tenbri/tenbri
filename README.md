@@ -84,7 +84,7 @@ v0.1.0 ships every feature below, each labelled:
 | CLI | ✅ init · ✅ append · ✅ verify · ✅ query · ✅ tail · 🚧 checkpoint · ⬜ receipt · ⬜ keys · ⬜ erase · ⬜ gc | ⬜ export · ⬜ mcp · ⬜ proxy · ⬜ ingest |
 | Bindings | ✅ Rust · ⬜ Python · ⬜ Node · ⬜ WASM verifier | |
 | Adapters | ⬜ Claude Agent SDK · ⬜ OpenAI Agents SDK · ⬜ LangGraph and LangChain | ⬜ Pydantic AI · ⬜ Vercel AI SDK · ⬜ Mastra · ⬜ Google ADK · ⬜ AWS Strands · ⬜ Microsoft Agent Framework · ⬜ CrewAI · ⬜ LlamaIndex · ⬜ A2A |
-| APIs and tooling | 🚧 tenbrid REST and gRPC · 🚧 action schemas · ⬜ OpenTelemetry correlation · ⬜ webhook and OTLP streaming · ⬜ test kit · ⬜ C2SP tiles and witness protocol | ⬜ Generated Go, Java and .NET clients · ⬜ Kafka · ⬜ read-only viewer · ⬜ OpenLineage and W3C PROV exports |
+| APIs and tooling | 🚧 tenbrid REST and gRPC · ✅ action schemas · ⬜ OpenTelemetry correlation · ⬜ webhook and OTLP streaming · ⬜ test kit · ⬜ C2SP tiles and witness protocol | ⬜ Generated Go, Java and .NET clients · ⬜ Kafka · ⬜ read-only viewer · ⬜ OpenLineage and W3C PROV exports |
 
 ## Non-goals
 
