@@ -65,32 +65,26 @@ on the way to v0.1.0 through `0.1.0-alpha`, `-beta` and `-rc` pre-releases
 ([CONTRIBUTING.md](CONTRIBUTING.md#releases)). Logs written by pre-releases are not covered by the
 format promise: the format is provisional until its external review ends ([spec/](spec/README.md)).
 
-| Pre-release | What it adds | Status |
-|---|---|---|
-| `0.1.0-alpha.1` | Format v1 spec and test vectors, canonical bytes, hash chain and signatures, stream and session keys with rotation and revocation, intent and outcome entries, local-disk writer, CLI (`init`, `append`, `verify`, `query`, `tail`) | ✅ Done |
-| `0.1.0-alpha.2` | S3, R2 and MinIO storage with the write protocol and gc, Merkle checkpoints, crash and race tests, `tenbrid` REST and gRPC API, action schemas | 🚧 In progress |
-| `0.1.0-beta.1` | Receipts, RFC 3161 timestamps, privacy (blob encryption, erasure), SQLite and Parquet index and query, Python, Node and WASM bindings, test kit, OpenTelemetry correlation, Claude Agent SDK, OpenAI Agents SDK and LangGraph adapters | ⬜ To do |
-| `0.1.0-rc.1` | Experimental features, witnesses and streaming, external review of the format, documentation | ⬜ To do |
-| `0.1.0` | Review fixes, format v1 frozen | ⬜ To do |
-
 v0.1.0 ships every feature below, each labelled:
 
 - **Stable**: covered by the format promise and the 0.x API policy.
 - **Experimental**: behind a Cargo feature or an experimental module, documented and tested, free
   to change in a 0.x minor release.
 
+✅ done · 🚧 in progress · ⬜ to do
+
 | Area | Stable | Experimental |
 |---|---|---|
-| Format and integrity | Entry format v1, canonical bytes, hash chain, signatures, Merkle checkpoints, receipts, links | |
-| Keys | Stream and session keys, rotation, revocation, key file, OS keychain | PKCS#11, cloud KMS, passkey attestations |
-| Storage | Local disk, AWS S3, Cloudflare R2, MinIO | Google Cloud Storage, Azure Blob, Postgres |
-| Anchoring | Checkpoint publishing to auditors, RFC 3161 timestamps | Sigstore Rekor, witnesses |
-| Privacy | Blob encryption, per-subject keyed digests and erasure, local key store | |
-| Query | SQLite or Parquet index | `--as-of` time travel, Iceberg index |
-| CLI | init, append, verify, query, receipt, checkpoint, keys, erase, gc, tail | export, mcp, proxy, ingest |
-| Bindings | Rust, Python, Node, WASM verifier | |
-| Adapters | Claude Agent SDK, OpenAI Agents SDK, LangGraph and LangChain | Pydantic AI, Vercel AI SDK, Mastra, Google ADK, AWS Strands, Microsoft Agent Framework, CrewAI, LlamaIndex, A2A |
-| APIs and tooling | tenbrid REST and gRPC, OpenTelemetry correlation, action schemas, webhook and OTLP streaming, test kit, C2SP tiles and witness protocol | Generated Go, Java and .NET clients, Kafka, read-only viewer, OpenLineage and W3C PROV exports |
+| Format and integrity | ✅ Entry format v1 · ✅ canonical bytes · ✅ hash chain · ✅ signatures · ✅ intent and outcome entries · ✅ links · 🚧 Merkle checkpoints · ⬜ receipts | |
+| Keys | ✅ Stream and session keys · ✅ rotation · ✅ revocation · ✅ key file · ✅ OS keychain (macOS, Windows) | ⬜ PKCS#11 · ⬜ cloud KMS · ⬜ passkey attestations |
+| Storage | ✅ Local disk · 🚧 AWS S3 · 🚧 Cloudflare R2 · 🚧 MinIO | ⬜ Google Cloud Storage · ⬜ Azure Blob · ⬜ Postgres |
+| Anchoring | ⬜ Checkpoint publishing to auditors · ⬜ RFC 3161 timestamps | ⬜ Sigstore Rekor · ⬜ witnesses |
+| Privacy | ⬜ Blob encryption · ⬜ per-subject keyed digests and erasure · ⬜ local key store | |
+| Query | ⬜ SQLite or Parquet index | ⬜ `--as-of` time travel · ⬜ Iceberg index |
+| CLI | ✅ init · ✅ append · ✅ verify · ✅ query · ✅ tail · 🚧 checkpoint · ⬜ receipt · ⬜ keys · ⬜ erase · ⬜ gc | ⬜ export · ⬜ mcp · ⬜ proxy · ⬜ ingest |
+| Bindings | ✅ Rust · ⬜ Python · ⬜ Node · ⬜ WASM verifier | |
+| Adapters | ⬜ Claude Agent SDK · ⬜ OpenAI Agents SDK · ⬜ LangGraph and LangChain | ⬜ Pydantic AI · ⬜ Vercel AI SDK · ⬜ Mastra · ⬜ Google ADK · ⬜ AWS Strands · ⬜ Microsoft Agent Framework · ⬜ CrewAI · ⬜ LlamaIndex · ⬜ A2A |
+| APIs and tooling | 🚧 tenbrid REST and gRPC · 🚧 action schemas · ⬜ OpenTelemetry correlation · ⬜ webhook and OTLP streaming · ⬜ test kit · ⬜ C2SP tiles and witness protocol | ⬜ Generated Go, Java and .NET clients · ⬜ Kafka · ⬜ read-only viewer · ⬜ OpenLineage and W3C PROV exports |
 
 ## Non-goals
 
