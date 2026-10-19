@@ -12,7 +12,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use tenbri_core::{Entry, Head, Role, canon, sign};
 use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
-use tenbri_store::{LocalStore, Store};
+use tenbri_store::{AnyStore, Store};
 use tenbri_writer::{
     RECONCILE_AFTER_MS, ReadError, Reader, Writer, draft_from_json, now_ms, verify,
 };
@@ -35,25 +35,26 @@ struct Cli {
 enum Command {
     /// Create a stream and its stream key; print the fingerprint to pin.
     Init {
-        /// The stream's directory, <root>/<stream>; created, or empty.
-        path: PathBuf,
+        /// The stream: a directory, <root>/<stream>, created or empty; or an object-store prefix,
+        /// s3://bucket/<root>/<stream> or r2://bucket/<root>/<stream>, empty.
+        path: String,
         /// Keep the secret keys in the OS keychain instead of key files.
         #[cfg(feature = "keychain")]
         #[arg(long)]
         keychain: bool,
     },
     /// Append one entry, read as JSON on stdin; print it as stored.
-    Append { path: PathBuf },
+    Append { path: String },
     /// Check canonical bytes, chain, signatures and keys against a pinned key.
     Verify {
-        path: PathBuf,
+        path: String,
         /// Fingerprint (sha256:…) or public key (ed25519:…) of the stream's genesis key.
         #[arg(long, value_name = "FINGERPRINT")]
         key: Option<String>,
     },
     /// Print entries by input or action, each with its verification status, one JSON per line.
     Query {
-        path: PathBuf,
+        path: String,
         /// An input the entry used, as ref@version (policy:refund@14); repeat to require several.
         #[arg(long, value_name = "REF@VERSION")]
         input: Vec<String>,
@@ -65,7 +66,7 @@ enum Command {
     },
     /// Print the last entries, then follow new ones as they are written.
     Tail {
-        path: PathBuf,
+        path: String,
         /// How many existing entries to print first.
         #[arg(short = 'n', default_value_t = 10)]
         lines: usize,
@@ -129,7 +130,7 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
         Command::Append { path } => append(path, &keys_dir()?).await,
         Command::Verify { path, key } => {
             let pin = key.as_deref().map(pin).transpose()?;
-            let r = verify(&store(path)?, pin.as_deref()).await?;
+            let r = verify(&store(path).await?, pin.as_deref()).await?;
             let stream = r.stream.as_deref().unwrap_or("?");
             match (&r.broken, r.pinned) {
                 (Some(b), _) => {
@@ -168,7 +169,7 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
                         .ok_or_else(|| Fail(2, format!("--input {i}: expected ref@version")))
                 })
                 .collect::<Result<_, _>>()?;
-            let store = store(path)?;
+            let store = store(path).await?;
             let mut r = Reader::new(&store, pin.as_deref());
             let entries = read(&mut r).await?;
             if let Some(b) = r.chain().invalidated() {
@@ -199,7 +200,7 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
             key,
         } => {
             let pin = key.as_deref().map(pin).transpose()?;
-            let store = store(path)?;
+            let store = store(path).await?;
             let mut r = Reader::new(&store, pin.as_deref());
             let first = read(&mut r).await?;
             print_lines(&first[first.len().saturating_sub(*lines)..])?;
@@ -215,8 +216,21 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
     }
 }
 
-fn store(path: &Path) -> Result<LocalStore, Fail> {
-    LocalStore::open(path).map_err(|e| Fail(2, format!("{}: {e}", path.display())))
+/// The store at `location`: a local directory, or an object store (credentials from `AWS_*`;
+/// `CLOUDFLARE_ACCOUNT_ID` for R2).
+async fn store(location: &str) -> Result<AnyStore, Fail> {
+    tenbri_store::open(location)
+        .await
+        .map_err(|e| Fail(2, e.to_string()))
+}
+
+/// The key directory of `stream`, kept apart from it when it is a local directory.
+fn key_store(keys: &Path, location: &str, stream: &str) -> io::Result<KeyStore> {
+    if tenbri_store::is_url(location) {
+        KeyStore::open_for_object_store(keys, stream)
+    } else {
+        KeyStore::open(keys, Path::new(location), stream)
+    }
 }
 
 /// A `--key` value as a fingerprint: `sha256:…` as given, or the fingerprint of `ed25519:…`.
@@ -267,19 +281,26 @@ fn matches(e: &Entry, inputs: &[(&str, &str)], action: Option<&str>) -> bool {
         && action.is_none_or(|a| e.action.as_ref().is_some_and(|x| x.r#type == a))
 }
 
-async fn init(path: &Path, keys: &Path, backend: Backend) -> Result<u8, Fail> {
-    if path.exists() && std::fs::read_dir(path)?.next().is_some() {
-        return Err(Fail(2, format!("{} is not empty", path.display())));
+async fn init(path: &str, keys: &Path, backend: Backend) -> Result<u8, Fail> {
+    if !tenbri_store::is_url(path) {
+        let dir = Path::new(path);
+        if dir.exists() && std::fs::read_dir(dir)?.next().is_some() {
+            return Err(Fail(2, format!("{path} is not empty")));
+        }
+        std::fs::create_dir_all(dir)?;
     }
-    std::fs::create_dir_all(path)?;
+    let store = store(path).await?;
+    if store.get("HEAD").await?.is_some() {
+        return Err(Fail(2, format!("{path} already holds a stream")));
+    }
     let stream_key = Key::new_stream()?;
     let session = Key::new_session(now_ms(), SESSION_LIFETIME_MS)?;
     let id = sign::stream_id(&stream_key.signing.verifying_key());
-    let ks = KeyStore::open(keys, path, &id)?;
+    let ks = key_store(keys, path, &id)?;
     ks.save(&stream_key, backend)?;
     ks.save(&session, backend)?;
-    Writer::create(store(path)?, &stream_key, session).await?;
-    println!("created stream {id} at {}", path.display());
+    Writer::create(store, &stream_key, session).await?;
+    println!("created stream {id} at {path}");
     println!(
         "stream key fingerprint (pin it): {}",
         stream_key.fingerprint()
@@ -287,23 +308,23 @@ async fn init(path: &Path, keys: &Path, backend: Backend) -> Result<u8, Fail> {
     println!("keys: {}", ks.dir().display());
     println!(
         "verify with: tenbri verify {} --key {}",
-        path.display(),
+        path,
         stream_key.fingerprint()
     );
     Ok(0)
 }
 
-async fn append(path: &Path, keys: &Path) -> Result<u8, Fail> {
+async fn append(path: &str, keys: &Path) -> Result<u8, Fail> {
     let mut input = vec![];
     io::stdin().read_to_end(&mut input)?;
     let draft = draft_from_json(&input).map_err(|e| Fail(2, format!("stdin: {e}")))?;
-    let store = store(path)?;
+    let store = store(path).await?;
     let head = store
         .get("HEAD")
         .await?
-        .ok_or_else(|| Fail(2, format!("no stream at {}", path.display())))?;
+        .ok_or_else(|| Fail(2, format!("no stream at {path}")))?;
     let (head, _) = Head::parse(&head.bytes)?;
-    let ks = KeyStore::open(keys, path, &head.stream)?;
+    let ks = key_store(keys, path, &head.stream)?;
     // The writer pins the stream to its genesis key as this machine holds it.
     let metas = ks.list()?;
     let genesis = metas
