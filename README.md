@@ -17,6 +17,47 @@ on a local disk or an object store, and verifies offline against a trust root th
 It works on its own, with any agent framework, from Rust, Python, Node, the browser (WASM), the
 `tenbri` CLI or the `tenbrid` REST and gRPC API.
 
+## The problem
+
+Companies now give agents real authority: refunds, payments, account changes, production deploys,
+security responses. Afterwards they cannot prove what an agent did, what it saw, which rule allowed
+it, or who signed off.
+
+- **A customer disputes a refusal.** Support can show the reply, but not which policy version,
+  contract clause and permission produced it.
+- **An incident happens**: a wrong payment, a deleted record, an account disabled by mistake.
+  Engineers rebuild the story from logs in five services, each editable by the people being
+  investigated.
+- **A policy changes.** Nobody can list the decisions made under the old wording, so nobody can
+  review them.
+- **An auditor asks for evidence.** Teams send screenshots and CSV exports that prove nothing about
+  integrity.
+- **A prompt injection makes an agent act.** There is no record of what the agent read that led to
+  the action.
+
+Regulation is moving the same way: the EU AI Act (Article 12) asks for automatic record-keeping for
+high-risk systems, GDPR Article 22 for human review of automated decisions, and DORA, NIS2, SOC 2 and
+ISO 27001 for evidence of control.
+
+## Why not just logs?
+
+Logs tell operators what happened. Tenbri gives anyone, including someone who does not trust the
+operator, proof of what an agent decided and why.
+
+| | Application logs | Tenbri |
+|---|---|---|
+| Integrity | Editable, rotated, deleted | Hash-chained and signed; any change fails verification |
+| Who acted | A shared service account | The specific agent, person or service, with its own key |
+| What it saw | Free text, if anything | Inputs pinned by reference, version and content hash |
+| Why it was allowed | Rarely recorded | The rule or grant that allowed or refused it |
+| Human oversight | A Slack thread, if anything | The approval, as its own signed entry |
+| Timing | After the fact | The intent before the action, the outcome after |
+| Sharing with an auditor | Give them access to your systems | A receipt that verifies on its own, offline |
+| Personal data | Copied into log lines | Only hashes in the chain; bodies encrypted and erasable |
+
+Tenbri does not replace logs, traces or observability tools: it records decisions and links to the
+trace that produced them (OpenTelemetry trace and span ids).
+
 ## Status
 
 **Pre-release. Nothing is published yet and nothing here is usable.** This repository holds the
