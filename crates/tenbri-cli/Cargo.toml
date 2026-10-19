@@ -14,5 +14,21 @@ path = "src/main.rs"
 # The facade crate is also called tenbri: one page in cargo doc, not two.
 doc = false
 
+[features]
+# The CLI ships with every Stable feature.
+default = ["keychain"]
+keychain = ["tenbri-keys/keychain"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tenbri-core.workspace = true
+tenbri-keys.workspace = true
+tenbri-store.workspace = true
+tenbri-writer.workspace = true
+tokio = { version = "1", features = ["macros", "rt", "time"] }
+
+[dev-dependencies]
+serde_json = "1"
+
 [lints]
 workspace = true
