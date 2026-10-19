@@ -209,7 +209,9 @@ jobs:
           path: ${{ runner.temp }}/licenses
       # Not --locked: if Release Please left Cargo.lock behind the new version, cargo brings only the
       # workspace's own entries up to date here (release-please.yml's header).
-      - run: cargo build --release -p tenbri-cli -p tenbri-server --target "$TARGET"
+      # bash, not Windows' default PowerShell, where "$TARGET" is an empty PowerShell variable.
+      - shell: bash
+        run: cargo build --release -p tenbri-cli -p tenbri-server --target "$TARGET"
       - name: Package
         shell: bash
         run: |
