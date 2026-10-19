@@ -1,0 +1,48 @@
+{
+  "cases": [
+    {
+      "name": "basic",
+      "pin": "sha256:170241c12e8724974ea3b10fe536b7d848f7cbd0963f55eecf0a11e9edf52e9c",
+      "result": {
+        "entries": 14,
+        "ok": true
+      }
+    },
+    {
+      "name": "orphan-batch",
+      "note": "batch 15 chains from HEAD but HEAD does not name it: readers do not see it, a writer rolls it forward",
+      "pin": "sha256:170241c12e8724974ea3b10fe536b7d848f7cbd0963f55eecf0a11e9edf52e9c",
+      "result": {
+        "entries": 14,
+        "ok": true
+      }
+    },
+    {
+      "name": "missing-batch",
+      "pin": "sha256:170241c12e8724974ea3b10fe536b7d848f7cbd0963f55eecf0a11e9edf52e9c",
+      "result": {
+        "error": "missing_batch",
+        "ok": false,
+        "seq": 3
+      }
+    },
+    {
+      "name": "head-not-last-entry",
+      "pin": "sha256:170241c12e8724974ea3b10fe536b7d848f7cbd0963f55eecf0a11e9edf52e9c",
+      "result": {
+        "error": "bad_head",
+        "ok": false,
+        "seq": 14
+      }
+    },
+    {
+      "name": "head-mid-batch",
+      "pin": "sha256:170241c12e8724974ea3b10fe536b7d848f7cbd0963f55eecf0a11e9edf52e9c",
+      "result": {
+        "error": "bad_head",
+        "ok": false,
+        "seq": 10
+      }
+    }
+  ]
+}
