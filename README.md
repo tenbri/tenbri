@@ -17,6 +17,68 @@ on a local disk or an object store, and verifies offline against a trust root th
 It works on its own, with any agent framework, from Rust, Python, Node, the browser (WASM), the
 `tenbri` CLI or the `tenbrid` REST and gRPC API.
 
+## The problem
+
+Companies now give agents real authority: refunds, payments, account changes, production deploys,
+security responses. Afterwards they cannot prove what an agent did, what it saw, which rule allowed
+it, or who signed off.
+
+- **A customer disputes a refusal.** Support can show the reply, but not which policy version,
+  contract clause and permission produced it.
+- **An incident happens**: a wrong payment, a deleted record, an account disabled by mistake.
+  Engineers rebuild the story from logs in five services, each editable by the people being
+  investigated.
+- **A policy changes.** Nobody can list the decisions made under the old wording, so nobody can
+  review them.
+- **An auditor asks for evidence.** Teams send screenshots and CSV exports that prove nothing about
+  integrity.
+- **A prompt injection makes an agent act.** There is no record of what the agent read that led to
+  the action.
+
+Regulation is moving the same way: the EU AI Act (Article 12) asks for automatic record-keeping for
+high-risk systems, GDPR Article 22 for human review of automated decisions, and DORA, NIS2, SOC 2 and
+ISO 27001 for evidence of control.
+
+## Why not just logs?
+
+Logs tell operators what happened. Tenbri gives anyone, including someone who does not trust the
+operator, proof of what an agent decided and why.
+
+| | Application logs | Tenbri |
+|---|---|---|
+| Integrity | Editable, rotated, deleted | Hash-chained and signed; any change fails verification |
+| Who acted | A shared service account | The specific agent, person or service, with its own key |
+| What it saw | Free text, if anything | Inputs pinned by reference, version and content hash |
+| Why it was allowed | Rarely recorded | The rule or grant that allowed or refused it |
+| Human oversight | A Slack thread, if anything | The approval, as its own signed entry |
+| Timing | After the fact | The intent before the action, the outcome after |
+| Sharing with an auditor | Give them access to your systems | A receipt that verifies on its own, offline |
+| Personal data | Copied into log lines | Only hashes in the chain; bodies encrypted and erasable |
+
+Tenbri does not replace logs, traces or observability tools: it records decisions and links to the
+trace that produced them (OpenTelemetry trace and span ids).
+
+## Where it fits
+
+Anywhere an agent takes an action that someone may later need to justify: an action with
+consequences, a rule that allowed it, and a person who may have to answer for it.
+
+| Domain | The agent… | The question asked later | What Tenbri records |
+|---|---|---|---|
+| Customer support | Replies, refunds, issues credits | "Why did we refuse this customer's refund?" | Ticket, policy version, contract clause, rule, reply |
+| Finance operations | Pays invoices, approves expenses | "Who approved this payment, and on what basis?" | Invoice, purchase order, threshold, approver |
+| Security operations | Triages alerts, isolates hosts, disables accounts | "Why was this alert closed as harmless?" | Alert, enrichment, playbook version, action, analyst approval |
+| Software engineering | Merges changes, runs migrations, changes infrastructure | "Which agent changed production, from which instruction?" | Task, diff hash, checks run, approval, deploy |
+| IT and people operations | Grants and revokes access | "Who gave this person admin access?" | Request, access policy version, approver |
+| Banking and insurance | KYC checks, claims triage, credit pre-screening | "Why was this claim flagged?" | Documents read (hashed), rule and model versions, human reviewer |
+| Healthcare administration | Prior authorisation, scheduling, billing codes | "Which guideline version did the agent apply?" | Request, guideline version, outcome, clinician sign-off |
+| Legal and procurement | Reviews and redlines contracts | "Which clauses did the agent change, under which playbook?" | Document hash, playbook version, edits, approver |
+| Data and analytics | Queries sensitive data | "Who queried personal data, and why?" | Query hash, datasets touched, stated purpose, requester |
+| Multi-agent systems | Hands tasks to other agents | "Which agent in the chain made the call?" | Each hand-off and each agent's decision, linked across streams |
+
+**Not the right tool for** raw telemetry and traces (use OpenTelemetry), millions of events per
+second on one stream, or archiving every full prompt.
+
 ## Status
 
 **Pre-release. Nothing is published yet and nothing here is usable.** This repository holds the
