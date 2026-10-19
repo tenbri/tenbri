@@ -915,6 +915,7 @@ dependencies = [
  "serde_json",
  "tenbri-core",
  "tenbri-keys",
+ "tenbri-merkle",
  "tenbri-store",
  "tenbri-writer",
  "tokio",
@@ -966,6 +967,12 @@ version = "0.1.0-alpha.1"
 [[package]]
 name = "tenbri-merkle"
 version = "0.1.0-alpha.1"
+dependencies = [
+ "proptest",
+ "serde_json",
+ "sha2",
+ "tenbri-core",
+]
 
 [[package]]
 name = "tenbri-node"

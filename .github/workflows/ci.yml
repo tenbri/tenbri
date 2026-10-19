@@ -8,8 +8,9 @@
 # - python, node, wasm: each binding builds and its package imports, as release.yml builds it;
 # - contract: tenbrid's OpenAPI and protobuf files hold against the base branch, as Artbucket
 #   holds its v1 contract.
-# The test job also runs the conformance vectors (spec/vectors/) through tenbri-core and the local
-# store, the tamper property tests and the writer crash tests. R2 and S3 run nightly (nightly.yml).
+# The test job also runs the conformance vectors (spec/vectors/) through tenbri-core, tenbri-merkle
+# and the local store, the tamper property tests and the writer crash tests. R2 and S3 run nightly
+# (nightly.yml).
 # Still to come, with the code they test: the vectors through Python, Node and WASM, and fuzz targets
 # (60 seconds here, long runs nightly).
 name: CI
@@ -190,8 +191,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack
-      # The core does no I/O, so it builds for the browser unchanged.
-      - run: cargo build -p tenbri-core --target wasm32-unknown-unknown --locked
+      # The core and the Merkle crate do no I/O, so they build for the browser unchanged.
+      - run: cargo build -p tenbri-core -p tenbri-merkle --target wasm32-unknown-unknown --locked
       - run: wasm-pack build --release --target web --out-dir pkg --no-pack
         working-directory: bindings/wasm
 
