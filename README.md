@@ -60,11 +60,18 @@ trace that produced them (OpenTelemetry trace and span ids).
 
 ## Status
 
-**Pre-release. Nothing is published yet and nothing here is usable.** This repository holds the
-workspace, the release pipeline and the contributor workflow; the code lands crate by crate on the
-way to v0.1.0, through `0.1.0-alpha`, `-beta` and `-rc` pre-releases
+**Pre-release: `0.1.0-alpha.1` is out; nothing here is ready for production yet.** The code lands
+on the way to v0.1.0 through `0.1.0-alpha`, `-beta` and `-rc` pre-releases
 ([CONTRIBUTING.md](CONTRIBUTING.md#releases)). Logs written by pre-releases are not covered by the
 format promise: the format is provisional until its external review ends ([spec/](spec/README.md)).
+
+| Pre-release | What it adds | Status |
+|---|---|---|
+| `0.1.0-alpha.1` | Format v1 spec and test vectors, canonical bytes, hash chain and signatures, stream and session keys with rotation and revocation, intent and outcome entries, local-disk writer, CLI (`init`, `append`, `verify`, `query`, `tail`) | ✅ Done |
+| `0.1.0-alpha.2` | S3, R2 and MinIO storage with the write protocol and gc, Merkle checkpoints, crash and race tests, `tenbrid` REST and gRPC API, action schemas | 🚧 In progress |
+| `0.1.0-beta.1` | Receipts, RFC 3161 timestamps, privacy (blob encryption, erasure), SQLite and Parquet index and query, Python, Node and WASM bindings, test kit, OpenTelemetry correlation, Claude Agent SDK, OpenAI Agents SDK and LangGraph adapters | ⬜ To do |
+| `0.1.0-rc.1` | Experimental features, witnesses and streaming, external review of the format, documentation | ⬜ To do |
+| `0.1.0` | Review fixes, format v1 frozen | ⬜ To do |
 
 v0.1.0 ships every feature below, each labelled:
 
