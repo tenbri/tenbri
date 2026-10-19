@@ -1,0 +1,53 @@
+{
+  "keys": [
+    {
+      "fingerprint": "sha256:170241c12e8724974ea3b10fe536b7d848f7cbd0963f55eecf0a11e9edf52e9c",
+      "id": "stream:a",
+      "name": "a",
+      "pub": "ed25519:26ea1e8cd907cac3977eecd8cee7fa3d13aa0303ce53ce7fe359c3ebf17c525d",
+      "seed": "8d10630645fae294776a4853e2270060de9d05907462b1005839ff76571dfa2c",
+      "stream_id_if_genesis": "tnb1:170241c12e8724974ea3b10fe536b7d8"
+    },
+    {
+      "fingerprint": "sha256:e1b7fb6463f0ca92e5d8e4e1cee66435040b632abe4c3b6824009ddc17f3a2eb",
+      "id": "sess:a1",
+      "name": "s1",
+      "pub": "ed25519:53cd16c1c0d3dee6434208cfd227ee81a68b8611ed8fa242a3b5a0b56f878cdd",
+      "seed": "ce221f81e319e0896dcde27b3537bfdfb0baeac2dd24a3caa06c4452d5010757",
+      "stream_id_if_genesis": "tnb1:e1b7fb6463f0ca92e5d8e4e1cee66435"
+    },
+    {
+      "fingerprint": "sha256:4669df384f2678522ccd157af464660d68922d7a17f45875e23cd0a135aafc55",
+      "id": "sess:a2 or sess:b1",
+      "name": "s2",
+      "pub": "ed25519:3ff09572342bbe5adc247e4e354a17c55ffdc9c392bcff4280e49a793daa7afe",
+      "seed": "e8fc527836e07efd13795e0c7bd62fde4f9bb05dc22e4d8d5dafa06e6f884eca",
+      "stream_id_if_genesis": "tnb1:4669df384f2678522ccd157af464660d"
+    },
+    {
+      "fingerprint": "sha256:9db7816d19691cb19e558306e4d4df9e05dbc784c0d08216daf208a4a5c99efc",
+      "id": "stream:b",
+      "name": "b",
+      "pub": "ed25519:8ce11d76cc4b37e0f78993c35fe38d4c07a011732f1005fe222805b2b4f127e5",
+      "seed": "994e703313c9b94ce9b285a1d5e2aa0ba566eca0772fa829039074afd209f811",
+      "stream_id_if_genesis": "tnb1:9db7816d19691cb19e558306e4d4df9e"
+    },
+    {
+      "fingerprint": "sha256:aa15618c59bd808c3079ce4f3aabb856539a9d5312adf427d96c709c53d4704c",
+      "id": "",
+      "name": "attacker",
+      "pub": "ed25519:420d175058ab97cd81ee9d7bb07eb92bfbf6840662c34406ba7ecfd556e46c9e",
+      "seed": "cc4db29f66d0cdbf33fbf1c2498d339b73ba4d596330ae90ed6487be96f947c9",
+      "stream_id_if_genesis": "tnb1:aa15618c59bd808c3079ce4f3aabb856"
+    },
+    {
+      "fingerprint": "sha256:fec3b18668764894f12e212a78550383f11bfface2018e54a73faf1e8845037f",
+      "id": "",
+      "name": "approver",
+      "pub": "ed25519:5f5d1b9c6a29e383bac7319b3c983e126bae3003f8621cb737fed110c3018a53",
+      "seed": "70c9cf6ff6b29f67e53f1bfbddde6026b7dc0d911a52db0b5425831b636265e9",
+      "stream_id_if_genesis": "tnb1:fec3b18668764894f12e212a78550383"
+    }
+  ],
+  "seeds": "SHA-256 of \"tenbri vector key <name>\"; Ed25519 seeds as in RFC 8032"
+}

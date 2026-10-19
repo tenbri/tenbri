@@ -1,0 +1,3 @@
+# The test vectors are exact bytes: LF line ends, HEAD with no final line feed. Git must never
+# convert them, or a checkout with core.autocrlf (Windows) breaks the byte-for-byte rule.
+spec/vectors/** -text

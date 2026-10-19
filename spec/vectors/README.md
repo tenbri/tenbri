@@ -5,9 +5,22 @@ bindings and the WASM verifier run all of them in CI, and any other implementati
 [format](../README.md) can too. Once a vector is released it is frozen: a fix adds a new vector, it
 never edits an old one.
 
-Each vector will be a directory with its inputs (entries, keys, a stream on disk) and the expected
-result (canonical bytes, hashes, signatures, proofs, or the exact verification error). The layout is
-defined with the first vectors, before v0.1.0.
+**Draft.** These vectors go with the provisional [format v1](../format-v1.md) and may change until
+the format is final; they are frozen at the v0.1.0 tag. They are made from fixed seeds by
+`cargo run -p tenbri-core --example vectors -- spec/vectors`, except the canonical-JSON cases,
+which are written by hand. Error codes are the spec's (section 10).
+
+| File | Each case | An implementation checks |
+| --- | --- | --- |
+| `keys.json` | An Ed25519 seed, its public key, fingerprint and stream id | That it derives the same three |
+| `canonical.json` | `input` (or `input_hex`) and its `canonical` form, or the `error` | Canonicalisation, and that only the canonical form is a valid stored line |
+| `entries.json` | `valid`: a stored `line`, its `signing_input`, `hash` and `signer_pub`; `invalid`: a `line`, optionally a `signer_pub`, and the `error` | One entry on its own: canonical bytes, fields, kind rules, signature |
+| `chains.json` | A `pin` (or `null`), the stream's `lines` in order, and the `result`: `ok` with the entry count, or the first broken `seq` and its `error`. Cases with `skip` are placeholders for a later pre-release | A whole stream: chain, keys, rotation, revocation, intents |
+| `heads.json` | A stored `head`, its `signer_pub`, and its `signing_input` or `error` | HEAD's form and signature |
+| `streams.json` + `streams/<name>/` | A stream directory (HEAD and `batches/`), a `pin`, and the `result` | Reading the storage layout by following HEAD |
+
+Strings in the JSON files are the exact bytes, as UTF-8; `"\u0000"` in a `signing_input` is the
+0x00 byte.
 
 ## License
 

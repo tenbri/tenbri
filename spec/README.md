@@ -6,9 +6,12 @@ covered by the promise below.
 
 This directory is the definition of Tenbri's format; the Rust crates are the reference
 implementation, not the definition. A tool that follows this spec can read and verify a Tenbri log
-with no Tenbri binary at all. The spec text lands here before v0.1.0: entries (format v1), canonical
-bytes (RFC 8785), the hash chain, signatures with domain separation, Merkle checkpoints (RFC 6962,
-C2SP signed notes), receipts and links.
+with no Tenbri binary at all.
+
+- [format-v1.md](format-v1.md): entries, canonical bytes (RFC 8785), the hash chain, signatures
+  with domain separation, keys, HEAD, the storage layout and the write protocol. Merkle checkpoints
+  (RFC 6962, C2SP signed notes), receipts and links land in later pre-releases.
+- [vectors/](vectors/README.md): the conformance test vectors.
 
 ## Versioning
 

@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "head": "{\"batch\":8,\"counter\":14,\"hash\":\"sha256:ab567c5a2a2a4538925e5e8cc3e1ae575c92dc3d7193d3a292658f95ebd9b198\",\"seq\":14,\"sig\":\"ed25519:cd2d0bc5e87b4f5ae098216612d2d4f03e8351c8ff338d6d3035db7b4243580c9e0f0c22f6b2bcc8a68fa5d16003b11466ce0fa2410782708a63102c7c3cbd07\",\"signer\":\"sess:a1\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"v\":1}",
+      "name": "valid",
+      "signer_pub": "ed25519:53cd16c1c0d3dee6434208cfd227ee81a68b8611ed8fa242a3b5a0b56f878cdd",
+      "signing_input": "tenbri/head/v1\u0000{\"batch\":8,\"counter\":14,\"hash\":\"sha256:ab567c5a2a2a4538925e5e8cc3e1ae575c92dc3d7193d3a292658f95ebd9b198\",\"seq\":14,\"signer\":\"sess:a1\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"v\":1}"
+    },
+    {
+      "error": "bad_signature",
+      "head": "{\"batch\":8,\"counter\":14,\"hash\":\"sha256:ab567c5a2a2a4538925e5e8cc3e1ae575c92dc3d7193d3a292658f95ebd9b198\",\"seq\":14,\"sig\":\"ed25519:75f1b69252b6e7c9b0313aa0af524e3aea31dc95d807880108cd83c09546e0d873f2e41a595ede9d133e75a11ad4ad2ae9ab57e14e53699cdc1de571dfd0cf07\",\"signer\":\"sess:a1\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"v\":1}",
+      "name": "signed-with-entry-prefix",
+      "signer_pub": "ed25519:53cd16c1c0d3dee6434208cfd227ee81a68b8611ed8fa242a3b5a0b56f878cdd"
+    },
+    {
+      "error": "unknown_field",
+      "head": "{\"batch\":8,\"counter\":14,\"hash\":\"sha256:ab567c5a2a2a4538925e5e8cc3e1ae575c92dc3d7193d3a292658f95ebd9b198\",\"lease\":\"w1\",\"seq\":14,\"sig\":\"ed25519:cd2d0bc5e87b4f5ae098216612d2d4f03e8351c8ff338d6d3035db7b4243580c9e0f0c22f6b2bcc8a68fa5d16003b11466ce0fa2410782708a63102c7c3cbd07\",\"signer\":\"sess:a1\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"v\":1}",
+      "name": "unknown-field",
+      "signer_pub": "ed25519:53cd16c1c0d3dee6434208cfd227ee81a68b8611ed8fa242a3b5a0b56f878cdd"
+    },
+    {
+      "error": "bad_head",
+      "head": "{\"batch\":15,\"counter\":14,\"hash\":\"sha256:ab567c5a2a2a4538925e5e8cc3e1ae575c92dc3d7193d3a292658f95ebd9b198\",\"seq\":14,\"sig\":\"ed25519:cd2d0bc5e87b4f5ae098216612d2d4f03e8351c8ff338d6d3035db7b4243580c9e0f0c22f6b2bcc8a68fa5d16003b11466ce0fa2410782708a63102c7c3cbd07\",\"signer\":\"sess:a1\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"v\":1}",
+      "name": "batch-after-seq",
+      "signer_pub": "ed25519:53cd16c1c0d3dee6434208cfd227ee81a68b8611ed8fa242a3b5a0b56f878cdd"
+    },
+    {
+      "error": "not_canonical",
+      "head": "{\"batch\":8, \"counter\":14,\"hash\":\"sha256:ab567c5a2a2a4538925e5e8cc3e1ae575c92dc3d7193d3a292658f95ebd9b198\",\"seq\":14,\"sig\":\"ed25519:cd2d0bc5e87b4f5ae098216612d2d4f03e8351c8ff338d6d3035db7b4243580c9e0f0c22f6b2bcc8a68fa5d16003b11466ce0fa2410782708a63102c7c3cbd07\",\"signer\":\"sess:a1\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"v\":1}",
+      "name": "not-canonical",
+      "signer_pub": "ed25519:53cd16c1c0d3dee6434208cfd227ee81a68b8611ed8fa242a3b5a0b56f878cdd"
+    }
+  ]
+}

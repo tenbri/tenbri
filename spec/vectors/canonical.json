@@ -1,0 +1,159 @@
+{
+  "cases": [
+    {
+      "canonical": "{\"a\":1,\"b\":[true,false,null]}",
+      "input": "{\"a\":1,\"b\":[true,false,null]}",
+      "name": "already-canonical"
+    },
+    {
+      "canonical": "{\"a\":1,\"b\":[1,2]}",
+      "input": "{ \"a\" : 1 ,\n\t\"b\" : [ 1 , 2 ] }\r\n",
+      "name": "whitespace"
+    },
+    {
+      "canonical": "{\"a\":2,\"b\":1,\"c\":{\"y\":0,\"z\":0}}",
+      "input": "{\"b\":1,\"a\":2,\"c\":{\"z\":0,\"y\":0}}",
+      "name": "key-order"
+    },
+    {
+      "canonical": "{\"a\":4,\"€\":3,\"😀\":2,\"דּ\":1}",
+      "input": "{\"דּ\":1,\"😀\":2,\"€\":3,\"a\":4}",
+      "name": "key-order-utf16"
+    },
+    {
+      "canonical": "{\"B\":2,\"_\":4,\"a\":3,\"b\":1}",
+      "input": "{\"b\":1,\"B\":2,\"a\":3,\"_\":4}",
+      "name": "key-order-case"
+    },
+    {
+      "canonical": "{\"a\":[],\"o\":{},\"s\":\"\"}",
+      "input": "{ \"o\" : { } , \"a\" : [ ] , \"s\" : \"\" }",
+      "name": "empty"
+    },
+    {
+      "canonical": "[0,-1,9007199254740991,-9007199254740991,42]",
+      "input": "[0,-1,9007199254740991,-9007199254740991,42]",
+      "name": "integers"
+    },
+    {
+      "canonical": "[\"A\",\"/\",\"é\",\"€\",\"😀\"]",
+      "input": "[\"\\u0041\",\"\\/\",\"\\u00e9\",\"\\u20ac\",\"\\ud83d\\ude00\"]",
+      "name": "escapes-shortened"
+    },
+    {
+      "canonical": "[\"\\\"\",\"\\\\\",\"\\b\",\"\\t\",\"\\n\",\"\\f\",\"\\r\",\"\\u0000\",\"\\u001f\",\"\"]",
+      "input": "[\"\\\"\",\"\\\\\",\"\\b\",\"\\t\",\"\\n\",\"\\f\",\"\\r\",\"\\u0000\",\"\\u001F\",\"\\u007f\"]",
+      "name": "escapes-kept"
+    },
+    {
+      "canonical": "[\"  \"]",
+      "input": "[\"\\u2028\\u2029\"]",
+      "name": "line-separator-literal"
+    },
+    {
+      "canonical": "[true,false,null]",
+      "input": "[ true , false , null ]",
+      "name": "literals"
+    },
+    {
+      "error": "duplicate_key",
+      "input": "{\"a\":1,\"a\":1}",
+      "name": "duplicate-key"
+    },
+    {
+      "error": "duplicate_key",
+      "input": "{\"a\":1,\"b\":2,\"a\":3}",
+      "name": "duplicate-key-different-values"
+    },
+    {
+      "error": "duplicate_key",
+      "input": "{\"x\":[{\"k\":1,\"k\":2}]}",
+      "name": "duplicate-key-nested"
+    },
+    {
+      "error": "duplicate_key",
+      "input": "{\"a\":1,\"\\u0061\":2}",
+      "name": "duplicate-key-by-escape"
+    },
+    {
+      "error": "not_integer",
+      "input": "{\"a\":1.0}",
+      "name": "fraction"
+    },
+    {
+      "error": "not_integer",
+      "input": "[1.5]",
+      "name": "fraction-nonzero"
+    },
+    {
+      "error": "not_integer",
+      "input": "[1e2]",
+      "name": "exponent"
+    },
+    {
+      "error": "not_integer",
+      "input": "[1E2]",
+      "name": "exponent-upper"
+    },
+    {
+      "error": "not_integer",
+      "input": "[-0]",
+      "name": "negative-zero"
+    },
+    {
+      "error": "integer_range",
+      "input": "[9007199254740992]",
+      "name": "too-large"
+    },
+    {
+      "error": "integer_range",
+      "input": "[-9007199254740992]",
+      "name": "too-small"
+    },
+    {
+      "error": "parse",
+      "input": "[01]",
+      "name": "leading-zero"
+    },
+    {
+      "error": "parse",
+      "input": "[+1]",
+      "name": "plus-sign"
+    },
+    {
+      "error": "parse",
+      "input": "[\"\\ud800\"]",
+      "name": "lone-surrogate"
+    },
+    {
+      "error": "parse",
+      "input": "{\"a\":1} {\"b\":2}",
+      "name": "trailing-data"
+    },
+    {
+      "error": "parse",
+      "input": "[1,]",
+      "name": "trailing-comma"
+    },
+    {
+      "error": "parse",
+      "input": "{'a':1}",
+      "name": "single-quotes"
+    },
+    {
+      "error": "parse",
+      "input": "﻿{\"a\":1}",
+      "name": "byte-order-mark"
+    },
+    {
+      "error": "parse",
+      "input": "[\"a\u0001b\"]",
+      "name": "raw-control-character"
+    },
+    {
+      "error": "parse",
+      "input_hex": "5b22ff225d",
+      "name": "invalid-utf8"
+    }
+  ]
+}

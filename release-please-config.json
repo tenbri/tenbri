@@ -22,6 +22,11 @@
         },
         {
           "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.workspace.dependencies[?(@.path)].version"
+        },
+        {
+          "type": "toml",
           "path": "Cargo.lock",
           "jsonpath": "$.package[?(@.source == null)].version"
         },
