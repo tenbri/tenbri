@@ -108,7 +108,21 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
+      # A crate with no release on crates.io has no baseline: check the ones that have one.
+      - name: Crates on crates.io
+        id: published
+        run: |
+          packages=$(cargo metadata --no-deps --format-version 1 --locked \
+            | jq -r '.packages[] | select(.publish != []) | .name' \
+            | while read -r c; do
+                curl -sf -o /dev/null -A "tenbri CI (github.com/tenbri/tenbri)" \
+                  "https://crates.io/api/v1/crates/$c" && echo "$c"
+              done | paste -sd, -)
+          echo "Checking: $packages"
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
       - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: ${{ steps.published.outputs.packages }}
 
   storage:
     runs-on: ubuntu-latest
