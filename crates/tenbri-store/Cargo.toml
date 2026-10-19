@@ -10,3 +10,7 @@ homepage.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+fs4 = "1"
+sha2 = "0.11"

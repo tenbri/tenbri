@@ -10,3 +10,13 @@ homepage.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+getrandom = "0.4"
+serde_json = "1"
+tenbri-core.workspace = true
+tenbri-keys.workspace = true
+tenbri-store.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
