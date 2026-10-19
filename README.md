@@ -58,27 +58,6 @@ operator, proof of what an agent decided and why.
 Tenbri does not replace logs, traces or observability tools: it records decisions and links to the
 trace that produced them (OpenTelemetry trace and span ids).
 
-## Where it fits
-
-Anywhere an agent takes an action that someone may later need to justify: an action with
-consequences, a rule that allowed it, and a person who may have to answer for it.
-
-| Domain | The agent… | The question asked later | What Tenbri records |
-|---|---|---|---|
-| Customer support | Replies, refunds, issues credits | "Why did we refuse this customer's refund?" | Ticket, policy version, contract clause, rule, reply |
-| Finance operations | Pays invoices, approves expenses | "Who approved this payment, and on what basis?" | Invoice, purchase order, threshold, approver |
-| Security operations | Triages alerts, isolates hosts, disables accounts | "Why was this alert closed as harmless?" | Alert, enrichment, playbook version, action, analyst approval |
-| Software engineering | Merges changes, runs migrations, changes infrastructure | "Which agent changed production, from which instruction?" | Task, diff hash, checks run, approval, deploy |
-| IT and people operations | Grants and revokes access | "Who gave this person admin access?" | Request, access policy version, approver |
-| Banking and insurance | KYC checks, claims triage, credit pre-screening | "Why was this claim flagged?" | Documents read (hashed), rule and model versions, human reviewer |
-| Healthcare administration | Prior authorisation, scheduling, billing codes | "Which guideline version did the agent apply?" | Request, guideline version, outcome, clinician sign-off |
-| Legal and procurement | Reviews and redlines contracts | "Which clauses did the agent change, under which playbook?" | Document hash, playbook version, edits, approver |
-| Data and analytics | Queries sensitive data | "Who queried personal data, and why?" | Query hash, datasets touched, stated purpose, requester |
-| Multi-agent systems | Hands tasks to other agents | "Which agent in the chain made the call?" | Each hand-off and each agent's decision, linked across streams |
-
-**Not the right tool for** raw telemetry and traces (use OpenTelemetry), millions of events per
-second on one stream, or archiving every full prompt.
-
 ## Status
 
 **Pre-release. Nothing is published yet and nothing here is usable.** This repository holds the
