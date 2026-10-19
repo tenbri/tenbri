@@ -1,7 +1,9 @@
 # Releases without bumping versions by hand. Each push to main updates one pull request,
 # "chore: release x.y.z", that collects the Conventional Commits since the last release: the next
-# version, CHANGELOG.md, the [workspace.package] version every crate inherits (and Cargo.lock), and
-# bindings/wasm/package.json. The Python package reads its version from Cargo (maturin) and the npm
+# version, CHANGELOG.md, the [workspace.package] version every crate inherits, the workspace's own
+# entries in Cargo.lock (those with no source), and bindings/wasm/package.json. It is release-type
+# simple with TOML extra-files, not rust with the cargo-workspace plugin: those only know a version
+# written in each crate's [package] and reject version.workspace = true. The Python package reads its version from Cargo (maturin) and the npm
 # packages get theirs from napi version in release.yml. Merging it tags vX.Y.Z and publishes the
 # GitHub release, then release.yml publishes everything from that tag.
 #

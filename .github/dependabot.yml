@@ -32,3 +32,6 @@ updates:
     directory: /
     schedule: { interval: monthly }
     commit-message: { prefix: "ci" }
+    ignore:
+      # Its refs name Rust versions, not action versions: @1.85 is the MSRV and moves only by hand.
+      - dependency-name: dtolnay/rust-toolchain

@@ -1,7 +1,7 @@
 {
   "name": "tenbri",
   "version": "0.0.0",
-  "description": "A flight recorder for AI agents: every decision signed, chained and provable.",
+  "description": "Audit trail for AI agents: every decision signed, chained and provable.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

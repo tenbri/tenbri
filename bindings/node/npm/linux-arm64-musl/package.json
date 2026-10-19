@@ -8,7 +8,7 @@
   "files": [
     "tenbri.linux-arm64-musl.node"
   ],
-  "description": "A flight recorder for AI agents: every decision signed, chained and provable.",
+  "description": "Audit trail for AI agents: every decision signed, chained and provable.",
   "license": "Apache-2.0",
   "engines": {
     "node": ">= 20"
