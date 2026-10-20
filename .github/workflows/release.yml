@@ -23,16 +23,17 @@ name: Release
 # The tag must agree with the manifests: Cargo.toml's [workspace.package] version and
 # bindings/wasm/package.json, compared after normalising the pre-release spelling (0.1.0-alpha.1 on
 # crates.io and npm is 0.1.0a1 on PyPI, which the wheels are checked against). Release Please calls
-# this with the tag it made (release-please.yml). Run by hand with a tag, it publishes that release
-# again (a failed run, say): every registry skips a version it already has, and a manifest that
-# disagrees with the tag is only a warning.
+# this with the tag it made (release-please.yml). To publish a release again (a failed run, say), run
+# release-please.yml by hand with the tag, not this file: trusted publishers name release-please.yml.
+# Every registry skips a version it already has, and a manifest that disagrees with the tag is only
+# a warning.
 #
 # Each registry is skipped, not failed, until it is set up: crates.io needs a CARGO_REGISTRY_TOKEN
 # secret or the CRATES_IO_TRUSTED_PUBLISHING variable set to true, PyPI a PYPI_API_TOKEN secret or
 # PYPI_TRUSTED_PUBLISHING, npm an NPM_TOKEN secret or NPM_TRUSTED_PUBLISHING, Homebrew a
 # HOMEBREW_APP_ID variable and HOMEBREW_APP_PRIVATE_KEY secret (a GitHub App installed on the tap
 # repository only). Trusted publishers name
-# release-please.yml (and release.yml, for runs by hand) and the release environment.
+# release-please.yml (runs by hand too: see above) and the release environment.
 on:
   push:
     tags: ["v*"]

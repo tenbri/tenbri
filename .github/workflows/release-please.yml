@@ -15,12 +15,19 @@
 # With a RELEASE_PLEASE_TOKEN secret (a fine-grained token with contents and pull requests: write),
 # CI also runs on the release pull request and the tag's own push starts release.yml instead.
 # crates.io and PyPI trusted publishers name this file as the workflow, and the release environment.
+# To publish a release again (a failed run, say), run this workflow by hand with its tag: it skips
+# Release Please and calls release.yml from here, so the registries still see this file.
 name: Release please
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Publish this existing tag again, such as v0.1.0-alpha.1 (leave empty to run Release Please)
+        type: string
+        required: false
 
 permissions:
   contents: write
@@ -32,6 +39,7 @@ concurrency:
 
 jobs:
   release-please:
+    if: inputs.tag == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -52,7 +60,9 @@ jobs:
 
   publish:
     needs: release-please
-    if: needs.release-please.outputs.released == 'true' && needs.release-please.outputs.own-token != 'true'
+    if: >-
+      always() && (inputs.tag != '' ||
+      (needs.release-please.outputs.released == 'true' && needs.release-please.outputs.own-token != 'true'))
     permissions:
       contents: write # binaries, SHA256SUMS, the SBOM and licenses go on the GitHub release
       packages: write
@@ -60,5 +70,5 @@ jobs:
       attestations: write
     uses: ./.github/workflows/release.yml
     with:
-      tag: ${{ needs.release-please.outputs.tag }}
+      tag: ${{ inputs.tag || needs.release-please.outputs.tag }}
     secrets: inherit
