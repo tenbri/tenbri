@@ -296,7 +296,8 @@ pub(crate) fn is_hash(s: &str) -> bool {
     prefixed::<32>(s, "sha256:").is_some()
 }
 
-pub(crate) fn is_stream_id(s: &str) -> bool {
+/// A stream id: `tnb1:` and 32 lowercase hex digits.
+pub fn is_stream_id(s: &str) -> bool {
     prefixed::<16>(s, "tnb1:").is_some()
 }
 
