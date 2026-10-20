@@ -97,7 +97,7 @@ v0.1.0 ships every feature below, each labelled:
 |---|---|---|
 | Format and integrity | ✅ Entry format v1 · ✅ canonical bytes · ✅ hash chain · ✅ signatures · ✅ intent and outcome entries · ✅ links · ✅ Merkle checkpoints · ⬜ receipts | |
 | Keys | ✅ Stream and session keys · ✅ rotation · ✅ revocation · ✅ key file · ✅ OS keychain (macOS, Windows) | ⬜ PKCS#11 · ⬜ cloud KMS · ⬜ passkey attestations |
-| Storage | ✅ Local disk · ✅ AWS S3 · ✅ Cloudflare R2 · ✅ MinIO | ⬜ Google Cloud Storage · ⬜ Azure Blob · ⬜ Postgres |
+| Storage | ✅ Local disk · 🚧 AWS S3 (tested on MinIO; real S3 before beta.1) · ✅ Cloudflare R2 · ✅ MinIO | ⬜ Google Cloud Storage · ⬜ Azure Blob · ⬜ Postgres |
 | Anchoring | ⬜ Checkpoint publishing to auditors · ⬜ RFC 3161 timestamps | ⬜ Sigstore Rekor · ⬜ witnesses |
 | Privacy | ⬜ Blob encryption · ⬜ per-subject keyed digests and erasure · ⬜ local key store | |
 | Query | ⬜ SQLite or Parquet index | ⬜ `--as-of` time travel · ⬜ Iceberg index |
