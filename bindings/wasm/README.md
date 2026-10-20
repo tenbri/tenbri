@@ -1,7 +1,7 @@
 # @tenbri/wasm
 
-The offline verifier of [Tenbri](https://github.com/tenbri/tenbri) (audit trail for AI agents:
-every decision signed, chained and provable), compiled to WebAssembly from the same Rust code as
+The offline verifier of [Tenbri](https://github.com/tenbri/tenbri) (the open-source Agent
+Decision Record: every decision signed, chained and provable), compiled to WebAssembly from the same Rust code as
 the CLI. It checks a stream export, or a set of entries, against a key you pin: canonical bytes,
 the hash chain, signatures, key rotation and revocation, intents and outcomes, and, given a
 checkpoint you saw before, truncation and rewrites behind it. No network, no keys, nothing

@@ -1,7 +1,7 @@
 {
   "name": "@tenbri/openai-agents",
   "version": "0.0.0",
-  "description": "Tenbri for the OpenAI Agents SDK: every tool call, handoff and approval signed, chained and provable.",
+  "description": "The Tenbri Agent Decision Record for the OpenAI Agents SDK: every tool call, handoff and approval signed, chained and provable.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

@@ -1,6 +1,6 @@
 [package]
 name = "tenbri-cli"
-description = "The tenbri command-line tool."
+description = "The tenbri command-line tool for Tenbri, the open-source Agent Decision Record."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

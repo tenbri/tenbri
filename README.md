@@ -4,7 +4,7 @@
 
 <h1 align="center">Tenbri</h1>
 
-<p align="center"><strong>Audit trail for AI agents: every decision signed, chained and provable.</strong></p>
+<p align="center"><strong>The open-source Agent Decision Record: every decision signed, chained and provable.</strong></p>
 
 <p align="center">
   <a href="https://scorecard.dev/viewer/?uri=github.com/tenbri/tenbri"><img src="https://api.scorecard.dev/projects/github.com/tenbri/tenbri/badge" alt="OpenSSF Scorecard"></a>
@@ -15,8 +15,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
 </p>
 
-Tenbri is an open-source, tamper-evident record of what AI agents decided: who acted, under which
-rule and policy version, from which inputs, and who approved. It is written in Rust, stores plain files
+An Agent Decision Record is a signed, append-only record of every decision an AI agent makes:
+who acted, under which rule and inputs, who approved, and what happened, verifiable offline by
+anyone.
+
+Tenbri is the open-source one: a tamper-evident audit trail for AI agents. It is written in Rust, stores plain files
 on a local disk or an object store, and verifies offline against a trust root the verifier controls.
 It works on its own, with any agent framework, from Rust, Python, Node, the browser (WASM), the
 `tenbri` CLI or the `tenbrid` REST and gRPC API.

@@ -1,4 +1,4 @@
-"""Audit trail for AI agents: every decision signed, chained and provable.
+"""The open-source Agent Decision Record: every decision signed, chained and provable.
 
     import tenbri
 

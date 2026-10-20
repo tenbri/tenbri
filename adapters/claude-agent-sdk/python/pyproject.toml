@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "tenbri-claude-agent-sdk"
 # Set by release.yml from the tag, like the npm packages: one version for everything.
 version = "0.0.0"
-description = "Tenbri for the Claude Agent SDK: every tool call a signed, provable decision."
+description = "The Tenbri Agent Decision Record for the Claude Agent SDK: every tool call a signed, provable decision."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"

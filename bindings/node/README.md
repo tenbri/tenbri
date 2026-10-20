@@ -1,7 +1,7 @@
 # tenbri (Node.js)
 
-Node.js bindings for [Tenbri](https://github.com/tenbri/tenbri). Audit trail for AI agents:
-every decision signed, chained and provable. The same Rust core as the `tenbri` CLI and tenbrid,
+Node.js bindings for [Tenbri](https://github.com/tenbri/tenbri). The open-source Agent
+Decision Record: every decision signed, chained and provable. The same Rust core as the `tenbri` CLI and tenbrid,
 as a native addon (napi-rs) for Linux (glibc and musl), macOS and Windows, Node 20 and later,
 with TypeScript types.
 
