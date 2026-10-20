@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-beta.3](https://github.com/tenbri/tenbri/compare/v0.1.0-beta.2...v0.1.0-beta.3) (2026-10-20)
+
+
+### Features
+
+* **cli:** one-line output, show, recorded pins, and a quickstart ([#50](https://github.com/tenbri/tenbri/issues/50)) ([4def3c9](https://github.com/tenbri/tenbri/commit/4def3c954abc28a7b6486038046a1ebfd9e299b9))
+
 ## [0.1.0-beta.2](https://github.com/tenbri/tenbri/compare/v0.1.0-beta.1...v0.1.0-beta.2) (2026-10-20)
 
 
