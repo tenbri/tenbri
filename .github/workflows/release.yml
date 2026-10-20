@@ -6,9 +6,11 @@ name: Release
 #   arm64 and Windows x86_64, each on a runner of its own architecture, with SHA256SUMS, a CycloneDX
 #   SBOM and the third-party licenses (cargo-about), which every archive also carries;
 # - PyPI: tenbri, maturin abi3 wheels for Python 3.10+ (manylinux, musllinux, macOS, Windows) and the sdist,
-#   built here and uploaded by release-please.yml (PyPI's trusted publishing refuses a called workflow);
+#   built here and uploaded by release-please.yml (PyPI's trusted publishing refuses a called workflow),
+#   and the framework adapters (tenbri-claude-agent-sdk, tenbri-openai-agents, tenbri-langgraph);
 # - npm: tenbri and its per-platform @tenbri/node-* packages (napi-rs; glibc and musl Linux, macOS,
-#   Windows), and @tenbri/wasm, the verifier;
+#   Windows), @tenbri/wasm, the verifier, and the framework adapters (@tenbri/claude-agent-sdk,
+#   @tenbri/openai-agents, @tenbri/langgraph);
 # - Homebrew: Formula/tenbri.rb in tenbri/homebrew-tap, for stable releases only;
 # - ghcr.io/tenbri/tenbri: the CLI (tenbri proxy is the MCP proxy) and tenbrid, for amd64 and arm64, each pushed
 #   by digest and joined into one image, as Artbucket does.
@@ -445,6 +447,41 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # The framework adapters' Python packages (adapters/<name>/python): pure Python, at the release
+  # version and requiring exactly this release's tenbri, so pip never resolves the 0.0.0 placeholder.
+  # release-please.yml uploads them with the wheels.
+  adapters-python:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PEP440: ${{ needs.version.outputs.pep440 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: |
+          python -m pip install --quiet build
+          python - <<'EOF'
+          import glob, os, re, subprocess, sys
+          version = os.environ["PEP440"]
+          for pyproject in sorted(glob.glob("adapters/*/python/pyproject.toml")):
+              text = open(pyproject).read()
+              text = re.sub(r'(?m)^version = "[^"]*"', f'version = "{version}"', text, count=1)
+              text = re.sub(r'"tenbri(?:\s*[<>=!~][^"]*)?"', f'"tenbri=={version}"', text)
+              open(pyproject, "w").write(text)
+              subprocess.run([sys.executable, "-m", "build", "--outdir", "dist", os.path.dirname(pyproject)], check=True)
+          EOF
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-adapters
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
   node-addons:
     needs: version
     strategy:
@@ -562,6 +599,27 @@ jobs:
                 echo "::warning::$name's latest points at a pre-release. Move it with npm dist-tag (needs NPM_TOKEN and a 0.0.0 placeholder)."
               fi
             fi
+          done
+
+      # The framework adapters' npm packages (adapters/<name>/typescript), after the tenbri package
+      # they build against: each at the release version, depending on exactly this tenbri.
+      - name: Publish the adapters
+        run: |
+          for _ in $(seq 20); do [ "$(npm view "tenbri@$VERSION" version 2>/dev/null)" = "$VERSION" ] && break; sleep 15; done
+          for dir in adapters/*/typescript; do
+            name=$(jq -r .name "$dir/package.json")
+            if [ "$(npm view "$name@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+              echo "$name@$VERSION is already on npm."
+              continue
+            fi
+            (
+              cd "$dir"
+              npm version "$VERSION" --no-git-tag-version --allow-same-version
+              npm pkg set "peerDependencies.tenbri=$VERSION" "devDependencies.tenbri=$VERSION"
+              npm install --no-audit --no-fund
+              npm run build
+              npm publish --provenance --access public --tag "$NPM_TAG"
+            )
           done
 
   # One image per architecture, on its own hardware, from the static binary the release ships,
