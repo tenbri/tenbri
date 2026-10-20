@@ -38,14 +38,26 @@ it, or who signed off.
 Regulation is moving the same way. Tenbri gives you the records these ask for; it does not make a
 system compliant on its own.
 
-| Regulation or standard | What it asks for | What Tenbri records |
-|---|---|---|
-| EU AI Act [Article 12](https://artificialintelligenceact.eu/article/12/), [Article 19](https://artificialintelligenceact.eu/article/19/) and [Article 26](https://artificialintelligenceact.eu/article/26/) | Automatic event logs over a high-risk system's lifetime, kept at least six months | Every decision, signed and chained, on storage you control, for as long as you keep it |
-| EU AI Act [Article 14](https://artificialintelligenceact.eu/article/14/) | Effective human oversight | Approvals and overrides as their own signed entries |
-| GDPR [Article 22](https://gdpr-info.eu/art-22-gdpr/) | Human review of automated decisions, and the means to contest them | The inputs, rule and approver behind each decision; personal data erasable without breaking the chain |
-| [DORA](https://eur-lex.europa.eu/eli/reg/2022/2554/oj) and [NIS2](https://eur-lex.europa.eu/eli/dir/2022/2555/oj) | Incident reporting and evidence of control over ICT systems | A timeline of what agents did during an incident that no one could edit afterwards |
-| [SOC 2](https://www.aicpa-cima.com/topic/audit-assurance/audit-and-assurance-greater-than-soc-2), [ISO/IEC 27001](https://www.iso.org/standard/27001) and [ISO/IEC 42001](https://www.iso.org/standard/42001) | Evidence that controls work, for auditors | Receipts an auditor verifies offline, without access to your systems |
-| [NIST AI RMF](https://www.nist.gov/itl/ai-risk-management-framework) | Traceability and accountability of AI decisions | Who acted, under which policy version, and the trace that produced it |
+- **EU AI Act** [Article 12](https://artificialintelligenceact.eu/article/12/),
+  [Article 19](https://artificialintelligenceact.eu/article/19/) and
+  [Article 26](https://artificialintelligenceact.eu/article/26/): automatic logs over a high-risk
+  system's lifetime, kept at least six months. Tenbri keeps every decision signed and chained, on
+  storage you control.
+- **EU AI Act** [Article 14](https://artificialintelligenceact.eu/article/14/): human oversight.
+  Approvals and overrides are their own signed entries.
+- **GDPR** [Article 22](https://gdpr-info.eu/art-22-gdpr/): human review of automated decisions and
+  the means to contest them. Each decision names its inputs, rule and approver; personal data can be
+  erased without breaking the chain.
+- [**DORA**](https://eur-lex.europa.eu/eli/reg/2022/2554/oj) and
+  [**NIS2**](https://eur-lex.europa.eu/eli/dir/2022/2555/oj): incident reporting and evidence of
+  control. A timeline of what agents did that no one could edit afterwards.
+- [**SOC 2**](https://www.aicpa-cima.com/topic/audit-assurance/audit-and-assurance-greater-than-soc-2),
+  [**ISO/IEC 27001**](https://www.iso.org/standard/27001) and
+  [**ISO/IEC 42001**](https://www.iso.org/standard/42001): evidence that controls work. Receipts an
+  auditor verifies offline, without access to your systems.
+- [**NIST AI RMF**](https://www.nist.gov/itl/ai-risk-management-framework): traceability and
+  accountability of AI decisions. Who acted, under which policy version, and the trace that
+  produced it.
 
 ## Why not just logs?
 
