@@ -224,15 +224,22 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: OpenAPI holds against the base branch
+      - name: OpenAPI loads, and holds against the base branch
         run: |
+          oasdiff() { docker run --rm -v "$RUNNER_TEMP:/base" -v "$PWD/contract:/head" tufin/oasdiff "$@"; }
+          # The branch's own document must load (a dangling $ref does not), base or no base.
+          oasdiff breaking /head/openapi.v1.yaml /head/openapi.v1.yaml --fail-on ERR
           if ! git cat-file -e "origin/$BASE:contract/openapi.v1.yaml" 2>/dev/null; then
             echo "No contract/openapi.v1.yaml on $BASE yet: nothing to hold."
             exit 0
           fi
           git show "origin/$BASE:contract/openapi.v1.yaml" > "$RUNNER_TEMP/base.yaml"
-          docker run --rm -v "$RUNNER_TEMP:/base" -v "$PWD/contract:/head" tufin/oasdiff \
-            breaking /base/base.yaml /head/openapi.v1.yaml --fail-on ERR
+          # A base that does not load holds nothing; it must not block every pull request.
+          if ! oasdiff breaking /base/base.yaml /base/base.yaml > /dev/null 2>&1; then
+            echo "::warning::$BASE's contract/openapi.v1.yaml does not load, so nothing is compared. Fix it on $BASE."
+            exit 0
+          fi
+          oasdiff breaking /base/base.yaml /head/openapi.v1.yaml --fail-on ERR
       - uses: bufbuild/buf-action@v1
         with:
           setup_only: true
