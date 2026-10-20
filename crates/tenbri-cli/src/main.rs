@@ -2,7 +2,8 @@
 //!
 //! Exit codes, stable from 0.1.0: 0 success; 1 the stream does not verify (the first broken
 //! sequence number is printed); 2 any other error; 3 `verify` without `--key`: the stream is
-//! consistent with its own genesis key, which proves nothing about who wrote it.
+//! consistent with its own genesis key, which proves nothing about who wrote it; `schema check`
+//! exits 1 when an entry breaks its action's schema.
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -12,6 +13,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use tenbri_core::{Entry, Head, Role, canon, sign};
 use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
+use tenbri_schema::{Schemas, Unknown};
 use tenbri_store::{AnyStore, Store};
 use tenbri_writer::{
     RECONCILE_AFTER_MS, ReadError, Reader, Writer, draft_from_json, now_ms, verify,
@@ -75,6 +77,24 @@ enum Command {
         no_follow: bool,
         #[arg(long, value_name = "FINGERPRINT")]
         key: Option<String>,
+    },
+    /// Action schemas (tenbri.toml).
+    Schema {
+        #[command(subcommand)]
+        command: SchemaCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum SchemaCommand {
+    /// Validate tenbri.toml, then every entry of the given streams against it. Exit 1 if an
+    /// entry breaks its action's schema.
+    Check {
+        /// Streams to check: directories, <root>/<stream>, or s3:// / r2:// URLs.
+        paths: Vec<String>,
+        /// The schema file.
+        #[arg(long, default_value = "tenbri.toml", value_name = "FILE")]
+        schema: PathBuf,
     },
 }
 
@@ -213,7 +233,45 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
                 print_lines(&read(&mut r).await?)?;
             }
         }
+        Command::Schema {
+            command: SchemaCommand::Check { paths, schema },
+        } => schema_check(schema, paths).await,
     }
+}
+
+async fn schema_check(file: &Path, paths: &[String]) -> Result<u8, Fail> {
+    let schemas = Schemas::load(file).map_err(|e| Fail(2, e))?;
+    println!(
+        "{}: {} action schemas, unknown actions {}",
+        file.display(),
+        schemas.actions.len(),
+        match schemas.unknown_actions {
+            Unknown::Reject => "rejected",
+            Unknown::Warn => "warned about",
+        }
+    );
+    let mut code = 0;
+    for path in paths {
+        let store = store(path).await?;
+        let mut r = Reader::new(&store, None);
+        let (mut checked, mut bad) = (0, 0);
+        for e in read(&mut r).await? {
+            let c = schemas.check(&e);
+            for w in &c.warnings {
+                println!("{} seq {}: warning: {w}", path, e.seq);
+            }
+            for v in &c.violations {
+                println!("{} seq {}: {v}", path, e.seq);
+            }
+            checked += 1;
+            bad += usize::from(!c.violations.is_empty());
+        }
+        println!("{}: {checked} entries, {bad} break their schema", path);
+        if bad > 0 {
+            code = 1;
+        }
+    }
+    Ok(code)
 }
 
 /// The store at `location`: a local directory, or an object store (credentials from `AWS_*`;

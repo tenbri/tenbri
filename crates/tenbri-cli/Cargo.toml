@@ -25,6 +25,7 @@ s3 = ["tenbri-store/s3"]
 clap = { version = "4", features = ["derive"] }
 tenbri-core.workspace = true
 tenbri-keys.workspace = true
+tenbri-schema.workspace = true
 tenbri-store.workspace = true
 tenbri-writer.workspace = true
 tokio = { version = "1", features = ["macros", "rt", "time"] }

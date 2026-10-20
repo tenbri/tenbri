@@ -109,7 +109,21 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
+      # A crate with no release on crates.io has no baseline: check the ones that have one.
+      - name: Crates on crates.io
+        id: published
+        run: |
+          packages=$(cargo metadata --no-deps --format-version 1 --locked \
+            | jq -r '.packages[] | select(.publish != []) | .name' \
+            | while read -r c; do
+                curl -sf -o /dev/null -A "tenbri CI (github.com/tenbri/tenbri)" \
+                  "https://crates.io/api/v1/crates/$c" && echo "$c"
+              done | paste -sd, -)
+          echo "Checking: $packages"
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
       - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: ${{ steps.published.outputs.packages }}
 
   storage:
     runs-on: ubuntu-latest
@@ -205,8 +219,10 @@ jobs:
         working-directory: bindings/wasm
 
   # tenbrid's API is a frozen contract per major version: nothing a client of the base branch
-  # relies on may change. contract/ holds openapi.v1.yaml and proto/; until tenbri-server writes
-  # them, the base branch has none and this passes.
+  # relies on may change. contract/ holds openapi.v1.yaml and proto/. That they match tenbrid is
+  # tested in the test job (crates/tenbri-server/tests/contract.rs: the OpenAPI document is generated
+  # from the REST handlers, the gRPC code from the proto); here they are linted and held against the
+  # base branch, which passes while the base branch has none.
   contract:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -229,6 +245,8 @@ jobs:
       - uses: bufbuild/buf-action@v1
         with:
           setup_only: true
+      - name: Protobuf lint
+        run: buf lint contract/proto
       - name: Protobuf holds against the base branch
         run: |
           if ! git cat-file -e "origin/$BASE:contract/proto" 2>/dev/null; then

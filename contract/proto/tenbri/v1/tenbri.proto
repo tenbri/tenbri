@@ -1,0 +1,173 @@
+// tenbrid's gRPC API, version 1. Frozen per major version: add, never change (CONTRIBUTING.md).
+// It has the operations of the REST API (contract/openapi.v1.yaml) and the same error codes.
+//
+// Entries travel as their canonical JSON (format v1, spec/format-v1.md): the exact bytes that are
+// hashed and signed, so a client can verify what it receives. Drafts travel as JSON objects of the
+// same shape, without the members the writer fills.
+//
+// Every call but health checks (grpc.health.v1) carries `authorization: Bearer <token>`. A failed
+// call carries the Tenbri error code (TENBRI_SCHEMA_VIOLATION, ...) in the `tenbri-error-code`
+// metadata and the REST error body as JSON in `tenbri-error-bin`.
+syntax = "proto3";
+
+package tenbri.v1;
+
+service TenbriService {
+  // Appends an intent; returns once it is durable. `idempotency_key` is the entry id.
+  rpc AppendIntent(AppendIntentRequest) returns (AppendIntentResponse);
+  // Appends the outcome of an intent.
+  rpc AppendOutcome(AppendOutcomeRequest) returns (AppendOutcomeResponse);
+  // Appends an approval.
+  rpc AppendApproval(AppendApprovalRequest) returns (AppendApprovalResponse);
+  // Appends several entries in order; each draft names its kind and carries its id.
+  rpc AppendBatch(AppendBatchRequest) returns (AppendBatchResponse);
+  // One entry by id.
+  rpc GetEntry(GetEntryRequest) returns (GetEntryResponse);
+  // Entries by input, action, principal, target or subject, in sequence order.
+  rpc QueryEntries(QueryEntriesRequest) returns (QueryEntriesResponse);
+  // Entries after `after_seq`, then new ones as they are written.
+  rpc TailEntries(TailEntriesRequest) returns (stream TailEntriesResponse);
+  // Reads the stream from storage and checks it against its pinned key.
+  rpc VerifyStream(VerifyStreamRequest) returns (VerifyStreamResponse);
+  // The action schemas from tenbri.toml.
+  rpc ListSchemas(ListSchemasRequest) returns (ListSchemasResponse);
+}
+
+message AppendIntentRequest {
+  // The stream's name in tenbrid's configuration, or its id (tnb1:...).
+  string stream = 1;
+  // The entry id (a ULID). The same key and draft return the original entry; the same key with
+  // another draft fails with TENBRI_IDEMPOTENCY_CONFLICT.
+  string idempotency_key = 2;
+  // The draft as a JSON object.
+  string draft_json = 3;
+}
+
+message AppendIntentResponse {
+  Appended appended = 1;
+}
+
+message AppendOutcomeRequest {
+  string stream = 1;
+  string idempotency_key = 2;
+  string draft_json = 3;
+}
+
+message AppendOutcomeResponse {
+  Appended appended = 1;
+}
+
+message AppendApprovalRequest {
+  string stream = 1;
+  string idempotency_key = 2;
+  string draft_json = 3;
+}
+
+message AppendApprovalResponse {
+  Appended appended = 1;
+}
+
+message AppendBatchRequest {
+  string stream = 1;
+  // Each draft as a JSON object with its `id` (the idempotency key) and `kind`.
+  repeated string drafts_json = 2;
+}
+
+message AppendBatchResponse {
+  // In the order of the drafts.
+  repeated Appended appended = 1;
+}
+
+message Appended {
+  // The entry as stored: its canonical JSON.
+  string entry_json = 1;
+  // True when the idempotency key was seen before and this is the original entry.
+  bool replayed = 2;
+  // Schema warnings (an undeclared action when tenbri.toml says "warn").
+  repeated string warnings = 3;
+}
+
+message GetEntryRequest {
+  string stream = 1;
+  string id = 2;
+}
+
+message GetEntryResponse {
+  QueriedEntry entry = 1;
+}
+
+message QueryEntriesRequest {
+  string stream = 1;
+  // Inputs the entry used, as ref@version (policy:refund@14); all must match.
+  repeated string inputs = 2;
+  // The action type (reply_ticket).
+  string action = 3;
+  // kind:id (agent:support-assistant).
+  string principal = 4;
+  // The action target, exactly.
+  string target = 5;
+  // The subject handle.
+  string subject = 6;
+  // Only entries with a greater sequence number.
+  uint64 after_seq = 7;
+  // At most this many entries; 0 means 100, and more than 1000 is 1000.
+  uint32 limit = 8;
+}
+
+message QueryEntriesResponse {
+  repeated QueriedEntry entries = 1;
+  // When more entries match: pass it as `after_seq` for the next page. Otherwise 0.
+  uint64 next_after_seq = 2;
+}
+
+message TailEntriesRequest {
+  string stream = 1;
+  uint64 after_seq = 2;
+}
+
+message TailEntriesResponse {
+  QueriedEntry entry = 1;
+}
+
+message QueriedEntry {
+  // The entry's canonical JSON.
+  string entry_json = 1;
+  Verification verification = 2;
+}
+
+enum Verification {
+  VERIFICATION_UNSPECIFIED = 0;
+  // Checked from the pinned genesis key up to this entry.
+  VERIFICATION_VERIFIED = 1;
+  // At or after the first sequence number that no longer verifies (a revocation reaching back).
+  VERIFICATION_BROKEN = 2;
+}
+
+message VerifyStreamRequest {
+  string stream = 1;
+}
+
+message VerifyStreamResponse {
+  // The stream id (tnb1:...).
+  string stream_id = 1;
+  // Entries checked before the first break, or all of them.
+  uint64 entries = 2;
+  // The genesis key fingerprint the stream was checked against.
+  string pinned_key = 3;
+  // Absent when the stream verifies.
+  Broken broken = 4;
+}
+
+message Broken {
+  uint64 seq = 1;
+  // The format v1 error code (bad_signature, ...).
+  string code = 2;
+  string message = 3;
+}
+
+message ListSchemasRequest {}
+
+message ListSchemasResponse {
+  // tenbri.toml as JSON: {"unknown_actions": ..., "actions": {...}}.
+  string schemas_json = 1;
+}

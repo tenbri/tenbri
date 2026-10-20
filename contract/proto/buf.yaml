@@ -1,0 +1,9 @@
+# buf lint (ci.yml's contract job) holds the protobuf contract to buf's STANDARD style; buf breaking
+# holds it against the base branch.
+version: v2
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE
