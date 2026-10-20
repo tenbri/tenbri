@@ -423,6 +423,46 @@ async fn rest_round_trip() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// A batch edited on disk after tenbrid verified it: a query answering from it refuses instead of
+/// returning the copy tenbrid read at startup.
+#[tokio::test(flavor = "multi_thread")]
+async fn query_refuses_an_edited_batch() {
+    let dir = tmp("edited");
+    init(&dir, "support").await;
+    init(&dir, "other").await;
+    let s = start(&dir, "").await;
+    let (st, v) = post(
+        &s,
+        "/v1/streams/support/intents",
+        Some(AGENT),
+        Some(&id()),
+        &intent("zendesk:ticket/9"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{v}");
+    let seq = v["entry"]["seq"].as_u64().unwrap();
+    assert_eq!(
+        q(&s, "target=zendesk:ticket/9").await["entries"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let batch = dir.join(format!("audit/support/batches/{seq:012}.jsonl"));
+    let text = std::fs::read_to_string(&batch).unwrap();
+    std::fs::write(&batch, text.replace("subj:42", "subj:43")).unwrap();
+    let path = "/v1/streams/support/entries?target=zendesk:ticket/9";
+    let (st, v) = get(&s, path, Some(AGENT)).await;
+    assert_eq!(
+        (st, code(&v)),
+        (StatusCode::INTERNAL_SERVER_ERROR, "TENBRI_STREAM_BROKEN"),
+        "{v}"
+    );
+    s.stop().await;
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rest_errors_write_nothing() {
     let dir = tmp("errors");

@@ -379,34 +379,51 @@ impl Daemon {
         let checkpoint = tenbri_index::latest_checkpoint(&lane.store, seq).await?;
         let internal =
             |e: std::io::Error| ApiError::new(ErrorCode::Internal, format!("index: {e}"));
-        // ponytail: SQLite and Parquet run on the async worker; spawn_blocking if large pages or
-        // Parquet scans hold it too long.
-        let mut qx = lane.query_index.lock().expect("query index lock");
-        let ix = lane.index.read().expect("index lock");
-        // Once more from scratch if the index disagrees with what was verified (it was changed
-        // under us, or by another process).
-        for fresh in [false, true] {
-            if fresh {
-                qx.clear().map_err(internal)?;
+        let (hits, answer) = {
+            // ponytail: SQLite and Parquet run on the async worker; spawn_blocking if large pages
+            // or Parquet scans hold it too long.
+            let mut qx = lane.query_index.lock().expect("query index lock");
+            let ix = lane.index.read().expect("index lock");
+            let mut answer = None;
+            // Once more from scratch if the index disagrees with what was verified (it was
+            // changed under us, or by another process).
+            for fresh in [false, true] {
+                if fresh {
+                    qx.clear().map_err(internal)?;
+                }
+                lane.feed(qx.as_mut(), &ix, checkpoint).map_err(internal)?;
+                let page = tenbri_index::search(qx.as_ref(), &q.filter, limit).map_err(internal)?;
+                let found: Option<Vec<Found>> = page
+                    .hits
+                    .iter()
+                    .map(|h| {
+                        let s = ix.entries.get((h.seq as usize).checked_sub(1)?)?;
+                        (s.hash == h.hash).then(|| (s.clone(), ix.verification(h.seq)))
+                    })
+                    .collect();
+                if let (Some(found), Some(state)) = (found, page.state) {
+                    answer = Some((page.hits, (found, page.next, state)));
+                    break;
+                }
             }
-            lane.feed(qx.as_mut(), &ix, checkpoint).map_err(internal)?;
-            let page = tenbri_index::search(qx.as_ref(), &q.filter, limit).map_err(internal)?;
-            let found: Option<Vec<Found>> = page
-                .hits
-                .iter()
-                .map(|h| {
-                    let s = ix.entries.get((h.seq as usize).checked_sub(1)?)?;
-                    (s.hash == h.hash).then(|| (s.clone(), ix.verification(h.seq)))
-                })
-                .collect();
-            if let (Some(found), Some(state)) = (found, page.state) {
-                return Ok((found, page.next, state));
-            }
-        }
-        Err(ApiError::new(
-            ErrorCode::Internal,
-            "the index disagrees with the stream after a rebuild",
-        ))
+            answer.ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::Internal,
+                    "the index disagrees with the stream after a rebuild",
+                )
+            })?
+        };
+        // What was verified at startup may have been edited on disk since: check the page's
+        // entries against storage before answering with them.
+        tenbri_index::confirm(&lane.store, &hits)
+            .await
+            .map_err(|e| match e.kind() {
+                std::io::ErrorKind::InvalidData => {
+                    ApiError::new(ErrorCode::StreamBroken, e.to_string())
+                }
+                _ => e.into(),
+            })?;
+        Ok(answer)
     }
 
     /// Entries after `after_seq`, then new ones as they are written, until shutdown. Ends with an

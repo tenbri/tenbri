@@ -487,6 +487,49 @@ pub async fn rebuild<S: Store>(ix: &mut dyn Backend, store: &S) -> io::Result<St
     update(ix, store).await
 }
 
+/// Checks each of `hits` against the batch in `store` that holds it, so that a batch edited on
+/// disk after it was indexed fails the query instead of answering from the index's copy. Reads
+/// only the batches the hits are in; the rest of the stream, and signatures, are `verify`'s job.
+pub async fn confirm<S: Store>(store: &S, hits: &[Hit]) -> io::Result<()> {
+    if hits.is_empty() {
+        return Ok(());
+    }
+    // ponytail: lists every batch key per query; keep each row's batch in the index if that
+    // listing gets slow. Put-if-absent keeps names up to HEAD on the chain, so the listing agrees
+    // with what a reader following HEAD finds.
+    let mut firsts: Vec<u64> = store
+        .list("batches/")
+        .await?
+        .iter()
+        .filter_map(|l| tenbri_writer::batch_seq(&l.key))
+        .collect();
+    firsts.sort_unstable();
+    let mut held: Option<(u64, Vec<u8>)> = None;
+    for h in hits {
+        let changed = || {
+            invalid(format!(
+                "the stream changed under the index at seq {}: run `tenbri verify`",
+                h.seq
+            ))
+        };
+        let first = match firsts.partition_point(|&f| f <= h.seq) {
+            0 => return Err(changed()),
+            i => firsts[i - 1],
+        };
+        if held.as_ref().is_none_or(|(f, _)| *f != first) {
+            let b = store.get(&batch_key(first)).await?.ok_or_else(changed)?;
+            held = Some((first, b.bytes));
+        }
+        let (_, bytes) = held.as_ref().expect("fetched above");
+        let lines = split_batch(bytes).map_err(|_| changed())?;
+        let line = lines.get((h.seq - first) as usize).ok_or_else(changed)?;
+        if sign::entry_hash(line) != h.hash || line != &h.line.as_bytes() {
+            return Err(changed());
+        }
+    }
+    Ok(())
+}
+
 /// The size of the latest checkpoint in `store` at or below `seq`.
 pub async fn latest_checkpoint<S: Store>(store: &S, seq: u64) -> io::Result<Option<u64>> {
     Ok(store
