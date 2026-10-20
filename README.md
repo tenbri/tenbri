@@ -83,7 +83,7 @@ v0.1.0 ships every feature below, each labelled:
 
 | Area | Stable | Experimental |
 |---|---|---|
-| Format and integrity | ✅ Entry format v1 · ✅ canonical bytes · ✅ hash chain · ✅ signatures · ✅ intent and outcome entries · ✅ links · 🚧 Merkle checkpoints · ⬜ receipts | |
+| Format and integrity | ✅ Entry format v1 · ✅ canonical bytes · ✅ hash chain · ✅ signatures · ✅ intent and outcome entries · ✅ links · ✅ Merkle checkpoints · ⬜ receipts | |
 | Keys | ✅ Stream and session keys · ✅ rotation · ✅ revocation · ✅ key file · ✅ OS keychain (macOS, Windows) | ⬜ PKCS#11 · ⬜ cloud KMS · ⬜ passkey attestations |
 | Storage | ✅ Local disk · 🚧 AWS S3 · 🚧 Cloudflare R2 · 🚧 MinIO | ⬜ Google Cloud Storage · ⬜ Azure Blob · ⬜ Postgres |
 | Anchoring | ⬜ Checkpoint publishing to auditors · ⬜ RFC 3161 timestamps | ⬜ Sigstore Rekor · ⬜ witnesses |

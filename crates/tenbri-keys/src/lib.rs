@@ -140,6 +140,7 @@ pub struct KeyMeta {
 
 /// The keys of one stream: `<keys dir>/<stream id>/`, one `<name>.json` per key and, for the file
 /// backend, its `<name>.secret`.
+#[derive(Clone, Debug)]
 pub struct KeyStore {
     dir: PathBuf,
     stream: String,

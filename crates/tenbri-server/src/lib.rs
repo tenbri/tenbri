@@ -10,8 +10,12 @@
 //! - Every append is checked against the format and the action schemas before it is written, and
 //!   returns once it is durable. Entries are read back from storage and verified before they are
 //!   served.
-//! - Each stream has a bounded queue; an append waits for it up to the deadline, then fails
-//!   with `TENBRI_DEADLINE_EXCEEDED` (backpressure).
+//! - Each stream is a `tenbri_writer::Lane` on a local directory or an S3, R2 or MinIO bucket:
+//!   concurrent appends are group-committed, the writer checkpoints the stream and refuses a HEAD
+//!   below the checkpoint it keeps with the keys. Its queue is bounded; an append waits for it up
+//!   to the deadline, then fails with `TENBRI_DEADLINE_EXCEEDED` (backpressure).
+//! - An intent's durability: `local` on local disk; `replicated` (the default) or `local` on an
+//!   object store, where every write is replicated before it returns.
 //! - Every request but health checks needs a bearer token, bound to one principal.
 //! - Shutdown stops accepting requests, ends tails, and waits for the writes in flight.
 
@@ -25,21 +29,21 @@ mod rest;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use futures_util::{Stream, StreamExt, stream};
 use tenbri_core::{
-    Durability, Entry, Head, Kind, Phase, Principal, Role, Source, canon, encoding, sign,
+    Code, Durability, Entry, Head, Kind, Phase, Principal, Role, Source, canon, encoding, sign,
 };
-use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
+use tenbri_keys::KeyStore;
 use tenbri_schema::Schemas;
-use tenbri_store::{LocalStore, Store};
-use tenbri_writer::{RECONCILE_AFTER_MS, Reader, WriteError, Writer, draft_from_json, now_ms};
+use tenbri_store::{AnyStore, Store};
+use tenbri_writer::{CHECKPOINT_FILE, LaneConfig, Reader, WriteError, Writer, draft_from_json};
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, Semaphore, broadcast, watch};
+use tokio::sync::{Mutex, broadcast, watch};
 use tokio_stream::wrappers::BroadcastStream;
 
 pub use config::{Config, StreamConfig, TokenConfig};
@@ -54,9 +58,6 @@ pub const MAX_BATCH: usize = 1000;
 
 /// How many new entries a tail may fall behind before it is ended with `TENBRI_TAIL_LAGGED`.
 const TAIL_BUFFER: usize = 1024;
-
-/// A session key is replaced when it has less than this left.
-const SESSION_MARGIN_MS: i64 = 60_000;
 
 /// The caller, from its bearer token.
 #[derive(Clone, Debug)]
@@ -131,20 +132,16 @@ pub struct Verified {
 struct Lane {
     name: String,
     id: String,
-    path: PathBuf,
     pin: String,
-    keys: KeyStore,
-    queue: Arc<Semaphore>,
-    io: Arc<Mutex<LaneIo>>,
+    store: AnyStore,
+    /// The store is an object store: every write is replicated before it returns.
+    replicated: bool,
+    writer: tenbri_writer::Lane,
+    /// Reads back what was written, checking it, to feed the index.
+    reader: Mutex<Reader<'static, AnyStore>>,
     index: RwLock<Index>,
     tx: broadcast::Sender<Arc<Stored>>,
     writable: AtomicBool,
-}
-
-struct LaneIo {
-    writer: Writer<LocalStore>,
-    /// Reads back what was written, checking it, to feed the index.
-    reader: Reader<'static, LocalStore>,
 }
 
 /// ponytail: every entry in memory, by position (`seq - 1`) and id; tenbri-index (SQLite or
@@ -162,14 +159,28 @@ pub struct Daemon {
     /// None without a tenbri.toml: nothing is checked.
     schemas: Option<Arc<Schemas>>,
     tokens: HashMap<String, Token>,
-    deadline: Duration,
     shutdown: watch::Sender<bool>,
 }
 
 impl Daemon {
-    /// Opens every configured stream, checks it from genesis against its pin, and makes sure it
-    /// has a session key.
+    /// Opens every configured stream, checks it from genesis against its pin and its latest
+    /// checkpoints, and makes sure it has a session key.
     pub async fn open(config: &Config) -> Result<Daemon, String> {
+        let mut stores = BTreeMap::new();
+        for (name, sc) in &config.streams {
+            let store = tenbri_store::open(&sc.path)
+                .await
+                .map_err(|e| format!("stream {name} ({}): {e}", sc.path))?;
+            stores.insert(name.clone(), store);
+        }
+        Daemon::with_stores(config, stores).await
+    }
+
+    /// [`Daemon::open`] with each stream's store already open, by name.
+    async fn with_stores(
+        config: &Config,
+        mut stores: BTreeMap<String, AnyStore>,
+    ) -> Result<Daemon, String> {
         let schemas = match &config.schema {
             Some(p) => Some(Arc::new(Schemas::load(p)?)),
             None => None,
@@ -180,10 +191,16 @@ impl Daemon {
             .or_else(tenbri_keys::default_dir)
             .ok_or("no keys directory: set keys or TENBRI_KEYS")?;
         let mut lanes = BTreeMap::new();
+        let lane_config = LaneConfig {
+            queue: config.queue,
+            deadline: Duration::from_millis(config.deadline_ms),
+            ..LaneConfig::default()
+        };
         for (name, sc) in &config.streams {
-            let lane = Lane::open(name, sc, &keys, config.queue)
+            let store = stores.remove(name).ok_or("a stream without a store")?;
+            let lane = Lane::open(name, sc, store, &keys, lane_config)
                 .await
-                .map_err(|e| format!("stream {name} ({}): {e}", sc.path.display()))?;
+                .map_err(|e| format!("stream {name} ({}): {e}", sc.path))?;
             lanes.insert(name.clone(), Arc::new(lane));
         }
         let tokens = config
@@ -201,7 +218,6 @@ impl Daemon {
             lanes,
             schemas,
             tokens,
-            deadline: Duration::from_millis(config.deadline_ms),
             shutdown: watch::Sender::new(false),
         })
     }
@@ -312,34 +328,12 @@ impl Daemon {
             let e = lane.prepare(token, op, key, value, &entries)?;
             entries.push(e);
         }
-        // Backpressure: wait for room in the queue, then for the writer, up to the deadline.
-        let deadline = tokio::time::Instant::now() + self.deadline;
-        let busy = || {
-            ApiError::new(
-                ErrorCode::DeadlineExceeded,
-                format!(
-                    "stream {stream} is busy: no room in its queue within {} ms",
-                    self.deadline.as_millis()
-                ),
-            )
-        };
-        let n = u32::try_from(entries.len()).expect("a batch is at most MAX_BATCH");
-        let permit = tokio::time::timeout_at(deadline, lane.queue.clone().acquire_many_owned(n))
-            .await
-            .map_err(|_| busy())?
-            .expect("the queue is never closed");
-        let io = tokio::time::timeout_at(deadline, lane.io.clone().lock_owned())
-            .await
-            .map_err(|_| busy())?;
-        // Spawned, so a client that goes away cannot cancel a write half-way.
+        // Spawned, so a client that goes away cannot stop the read-back half-way. The lane's
+        // queue gives the backpressure: an append waits for room up to the deadline.
         let schemas = self.schemas.clone();
-        tokio::spawn(async move {
-            let _permit = permit;
-            let mut io = io;
-            lane.write(&mut io, entries, schemas.as_deref()).await
-        })
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::Internal, e.to_string()))?
+        tokio::spawn(async move { lane.write(entries, schemas.as_deref()).await })
+            .await
+            .map_err(|e| ApiError::new(ErrorCode::Internal, e.to_string()))?
     }
 
     pub fn get(&self, token: &Token, stream: &str, id: &str) -> Result<Found, ApiError> {
@@ -439,7 +433,7 @@ impl Daemon {
     /// Reads the stream from storage and checks all of it against its pinned key.
     pub async fn verify(&self, token: &Token, stream: &str) -> Result<Verified, ApiError> {
         let lane = self.lane(token, stream)?;
-        let r = tenbri_writer::verify(&LocalStore::open(&lane.path)?, Some(&lane.pin)).await?;
+        let r = tenbri_writer::verify(&lane.store, Some(&lane.pin)).await?;
         Ok(Verified {
             stream: lane.id.clone(),
             entries: r.entries,
@@ -456,7 +450,7 @@ impl Daemon {
     /// Waits for the writes in flight.
     pub async fn flush(&self) {
         for lane in self.lanes.values() {
-            drop(lane.io.lock().await);
+            lane.writer.flush().await;
         }
     }
 }
@@ -465,17 +459,22 @@ impl Lane {
     async fn open(
         name: &str,
         sc: &StreamConfig,
+        store: AnyStore,
         keys: &Path,
-        queue: usize,
+        config: LaneConfig,
     ) -> Result<Lane, String> {
-        let store = LocalStore::open(&sc.path).map_err(|e| e.to_string())?;
         let head = store
             .get("HEAD")
             .await
             .map_err(|e| e.to_string())?
             .ok_or("no stream here (run tenbri init)")?;
         let (head, _) = Head::parse(&head.bytes).map_err(|e| e.to_string())?;
-        let ks = KeyStore::open(keys, &sc.path, &head.stream).map_err(|e| e.to_string())?;
+        let ks = if tenbri_store::is_url(&sc.path) {
+            KeyStore::open_for_object_store(keys, &head.stream)
+        } else {
+            KeyStore::open(keys, Path::new(&sc.path), &head.stream)
+        }
+        .map_err(|e| e.to_string())?;
         let pin = match &sc.key {
             Some(k) => pin(k)?,
             // As `tenbri append` does: the genesis key as this machine holds it.
@@ -495,35 +494,34 @@ impl Lane {
                     )
                 })?,
         };
-        let writer = Writer::open(store.clone(), Some(&pin))
+        let mut writer = Writer::open(store.clone(), Some(&pin))
+            .await
+            .map_err(|e| e.to_string())?
+            .with_checkpoints(Some(ks.dir().join(CHECKPOINT_FILE)))
             .await
             .map_err(|e| e.to_string())?;
+        let writable = match writer.use_keys(ks).await {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("tenbrid: stream {name}: not writable: {e}");
+                false
+            }
+        };
         // One store per stream for the life of the process; the reader borrows it.
-        let leaked: &'static LocalStore = Box::leak(Box::new(store));
+        let leaked: &'static AnyStore = Box::leak(Box::new(store.clone()));
         let lane = Lane {
             name: name.to_owned(),
             id: head.stream,
-            path: sc.path.clone(),
             pin: pin.clone(),
-            keys: ks,
-            queue: Arc::new(Semaphore::new(queue)),
-            io: Arc::new(Mutex::new(LaneIo {
-                writer,
-                reader: Reader::new(leaked, Some(&pin)),
-            })),
+            replicated: matches!(store, AnyStore::Bucket(_)),
+            store,
+            writer: tenbri_writer::Lane::spawn(writer, config),
+            reader: Mutex::new(Reader::new(leaked, Some(&pin))),
             index: RwLock::default(),
             tx: broadcast::channel(TAIL_BUFFER).0,
-            writable: AtomicBool::new(false),
+            writable: AtomicBool::new(writable),
         };
-        {
-            let mut io = lane.io.lock().await;
-            lane.sync(&mut io).await.map_err(|e| e.to_string())?;
-            match lane.ensure_session(&mut io.writer).await {
-                Ok(()) => lane.writable.store(true, Ordering::Relaxed),
-                Err(e) => eprintln!("tenbrid: stream {name}: not writable: {e}"),
-            }
-            lane.sync(&mut io).await.map_err(|e| e.to_string())?;
-        }
+        lane.sync().await.map_err(|e| e.to_string())?;
         Ok(lane)
     }
 
@@ -577,15 +575,25 @@ impl Lane {
             e.source.get_or_insert(Source::Sdk);
         }
         if e.phase == Some(Phase::Intent) {
-            // ponytail: local disk is the only tier until tenbrid writes to object stores.
-            match e.durability.get_or_insert(Durability::Local) {
+            // On an object store every write is replicated, so `local` is kept too; on local
+            // disk nothing is replicated.
+            let tier = if self.replicated {
+                Durability::Replicated
+            } else {
+                Durability::Local
+            };
+            match *e.durability.get_or_insert(tier) {
                 Durability::Local => {}
+                Durability::Replicated if self.replicated => {}
                 d => {
+                    let here = if self.replicated {
+                        "tenbrid has no postgres tier"
+                    } else {
+                        "this stream is on local disk"
+                    };
                     return Err(ApiError::new(
                         ErrorCode::InvalidEntry,
-                        format!(
-                            "durability {d:?} is not available: this tenbrid writes to local disk"
-                        ),
+                        format!("durability {d:?} is not available: {here}"),
                     ));
                 }
             }
@@ -622,40 +630,23 @@ impl Lane {
         Ok(e)
     }
 
-    /// Under the lane's lock: replays, schema checks, then the writes, then the read-back.
+    /// Replays, schema checks, then the writes through the lane, then the read-back.
     async fn write(
         &self,
-        io: &mut LaneIo,
         drafts: Vec<Entry>,
         schemas: Option<&Schemas>,
     ) -> Result<Vec<Appended>, ApiError> {
         // The same id again: the original entry if the draft is the same, else a conflict.
         let mut done: Vec<Option<Appended>> = vec![];
         let mut seen = HashSet::new();
-        {
-            let ix = self.index.read().expect("index lock");
-            for d in &drafts {
-                if !seen.insert(d.id.as_str()) {
-                    return Err(ApiError::new(
-                        ErrorCode::InvalidRequest,
-                        format!("id {} appears twice in the batch", d.id),
-                    ));
-                }
-                done.push(match ix.ids.get(&d.id).map(|&i| ix.entries[i].clone()) {
-                    Some(s) if same(d, &s.entry) => Some(Appended {
-                        stored: s,
-                        replayed: true,
-                        warnings: vec![],
-                    }),
-                    Some(_) => {
-                        return Err(ApiError::new(
-                            ErrorCode::IdempotencyConflict,
-                            format!("id {} was used for a different entry", d.id),
-                        ));
-                    }
-                    None => None,
-                });
+        for d in &drafts {
+            if !seen.insert(d.id.as_str()) {
+                return Err(ApiError::new(
+                    ErrorCode::InvalidRequest,
+                    format!("id {} appears twice in the batch", d.id),
+                ));
             }
+            done.push(self.replay(d)?);
         }
         let mut warnings = vec![];
         for (d, _) in drafts.iter().zip(&done).filter(|(_, r)| r.is_none()) {
@@ -687,72 +678,91 @@ impl Lane {
             return Ok(done.into_iter().flatten().collect());
         }
 
-        let result = self.write_new(io, &drafts, &done).await;
+        let new: Vec<Entry> = drafts
+            .into_iter()
+            .zip(&done)
+            .filter(|(_, r)| r.is_none())
+            .map(|(d, _)| d)
+            .collect();
+        let n = new.len();
+        let results = self.writer.append_batch(new.clone()).await;
         // Whatever reached storage is read back, checked and indexed, failure or not.
-        let synced = self.sync(io).await;
+        let synced = self.sync().await;
+        let failed = results.iter().any(|r| {
+            matches!(r, Err(e) if !matches!(e, WriteError::Rejected(_) | WriteError::Backpressure))
+        });
         self.writable
-            .store(result.is_ok() && synced.is_ok(), Ordering::Relaxed);
-        let written = result?;
+            .store(synced.is_ok() && !failed, Ordering::Relaxed);
         synced?;
-        let ix = self.index.read().expect("index lock");
+        let written = results.iter().filter(|r| r.is_ok()).count();
+        let mut out = vec![];
+        for (d, r) in new.iter().zip(results) {
+            out.push(match r {
+                Ok(e) => {
+                    let ix = self.index.read().expect("index lock");
+                    let stored = ix.ids.get(&e.id).map(|&i| ix.entries[i].clone());
+                    Appended {
+                        stored: stored.ok_or_else(|| {
+                            ApiError::new(ErrorCode::Internal, format!("{} not read back", e.id))
+                        })?,
+                        replayed: false,
+                        warnings: vec![],
+                    }
+                }
+                // Written meanwhile by a concurrent request with the same id.
+                Err(WriteError::Rejected(e)) if e.code == Code::DuplicateId => {
+                    match self.replay(d)? {
+                        Some(a) => a,
+                        None => return Err(WriteError::Rejected(e).into()),
+                    }
+                }
+                Err(e) => {
+                    let mut err = ApiError::from(e);
+                    if n > 1 && written > 0 {
+                        err.message = format!(
+                            "{} ({written} of {n} new entries were written; retrying the batch is safe)",
+                            err.message
+                        );
+                    }
+                    return Err(err);
+                }
+            });
+        }
         let mut warnings = warnings.into_iter();
-        let mut written = written.into_iter();
+        let mut out = out.into_iter();
         Ok(done
             .into_iter()
             .map(|r| {
                 r.unwrap_or_else(|| {
-                    let id = written.next().expect("one id per new draft");
-                    Appended {
-                        stored: ix.entries[ix.ids[&id]].clone(),
-                        replayed: false,
-                        warnings: warnings.next().unwrap_or_default(),
-                    }
+                    let mut a = out.next().expect("one result per new draft");
+                    a.warnings = warnings.next().unwrap_or_default();
+                    a
                 })
             })
             .collect())
     }
 
-    /// Writes the drafts not replayed; returns their ids.
-    async fn write_new(
-        &self,
-        io: &mut LaneIo,
-        drafts: &[Entry],
-        done: &[Option<Appended>],
-    ) -> Result<Vec<String>, ApiError> {
-        let w = &mut io.writer;
-        self.ensure_session(w).await?;
-        let keep = drafts.iter().find_map(|d| d.intent.as_deref());
-        w.reconcile_stale(now_ms(), RECONCILE_AFTER_MS, keep)
-            .await?;
-        let new: Vec<&Entry> = drafts
-            .iter()
-            .zip(done)
-            .filter(|(_, r)| r.is_none())
-            .map(|(d, _)| d)
-            .collect();
-        let mut ids = vec![];
-        for d in &new {
-            match w.append((*d).clone()).await {
-                Ok(e) => ids.push(e.id),
-                Err(e) if new.len() > 1 && !ids.is_empty() => {
-                    let mut err = ApiError::from(e);
-                    err.message = format!(
-                        "{} ({} of {} new entries were written; retrying the batch is safe)",
-                        err.message,
-                        ids.len(),
-                        new.len()
-                    );
-                    return Err(err);
-                }
-                Err(e) => return Err(e.into()),
-            }
+    /// The entry already written with `d`'s id: the same draft is a replay, another a conflict.
+    fn replay(&self, d: &Entry) -> Result<Option<Appended>, ApiError> {
+        let ix = self.index.read().expect("index lock");
+        match ix.ids.get(&d.id).map(|&i| ix.entries[i].clone()) {
+            Some(s) if same(d, &s.entry) => Ok(Some(Appended {
+                stored: s,
+                replayed: true,
+                warnings: vec![],
+            })),
+            Some(_) => Err(ApiError::new(
+                ErrorCode::IdempotencyConflict,
+                format!("id {} was used for a different entry", d.id),
+            )),
+            None => Ok(None),
         }
-        Ok(ids)
     }
 
     /// Reads what HEAD has that the index does not, checking it, and publishes it to tails.
-    async fn sync(&self, io: &mut LaneIo) -> Result<(), ApiError> {
-        let new = io.reader.poll().await;
+    async fn sync(&self) -> Result<(), ApiError> {
+        let mut reader = self.reader.lock().await;
+        let new = reader.poll().await;
         let mut ix = self.index.write().expect("index lock");
         let new = match new {
             Ok(new) => new,
@@ -773,50 +783,7 @@ impl Lane {
             ix.entries.push(s.clone());
             let _ = self.tx.send(s);
         }
-        ix.broken_from = io.reader.chain().invalidated().map(|b| b.seq);
-        Ok(())
-    }
-
-    /// Signs with a stored session key valid for at least another minute, else certifies a new
-    /// one with the stream key, if this machine holds it.
-    ///
-    /// ponytail: the same steps as `tenbri append`; move both into tenbri-writer once its
-    /// alpha.2 API settles.
-    async fn ensure_session(&self, w: &mut Writer<LocalStore>) -> Result<(), WriteError> {
-        let now = now_ms();
-        if w.session()
-            .is_some_and(|s| s.valid_at(now + SESSION_MARGIN_MS))
-        {
-            return Ok(());
-        }
-        let metas = self.keys.list()?;
-        let mut sessions: Vec<_> = metas.iter().filter(|m| m.role == Role::Session).collect();
-        sessions.sort_by(|a, b| b.not_after.cmp(&a.not_after));
-        for m in sessions {
-            if let Ok(k) = self.keys.load(&m.id) {
-                if k.valid_at(now + SESSION_MARGIN_MS) && w.use_session(k).is_ok() {
-                    return Ok(());
-                }
-            }
-        }
-        let current = w
-            .chain()
-            .stream_key()
-            .ok_or_else(|| WriteError::NoSession("the stream has no stream key".into()))?
-            .to_owned();
-        let stream_key = self.keys.load(&current).map_err(|e| {
-            WriteError::NoSession(format!(
-                "no usable session key, and the stream key {current} is not in {}: {e}",
-                self.keys.dir().display()
-            ))
-        })?;
-        let session = Key::new_session(now, SESSION_LIFETIME_MS)?;
-        let backend = metas
-            .iter()
-            .find(|m| m.id == current)
-            .map_or(Backend::File, |m| m.backend);
-        self.keys.save(&session, backend)?;
-        w.certify_session(&stream_key, session).await?;
+        ix.broken_from = reader.chain().invalidated().map(|b| b.seq);
         Ok(())
     }
 }
@@ -916,75 +883,92 @@ pub async fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tenbri_keys::{Backend, Key, SESSION_LIFETIME_MS};
+    use tenbri_store::Bucket;
+    use tenbri_store::object_store::memory::InMemory;
+    use tenbri_writer::{new_id, now_ms};
 
-    async fn daemon(name: &str) -> (Daemon, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("tenbrid-unit-{name}-{}", std::process::id()));
+    async fn append(d: &Daemon, op: Op, body: &str) -> Result<Appended, ApiError> {
+        let t = d.authenticate(Some("Bearer t")).unwrap();
+        d.append(
+            &t,
+            "s",
+            op,
+            Some(&new_id(now_ms()).unwrap()),
+            body.as_bytes(),
+        )
+        .await
+    }
+
+    /// tenbrid on an in-memory bucket, an object store with S3's conditional-write answers:
+    /// replicated intents, group commit across requests, checkpoints, verify.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn on_an_object_store() {
+        let dir = std::env::temp_dir().join(format!("tenbrid-unit-bucket-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let path = dir.join("audit");
-        std::fs::create_dir_all(&path).unwrap();
+        let bucket = Bucket::new(Arc::new(InMemory::new()), "audit")
+            .await
+            .unwrap();
         let stream_key = Key::new_stream().unwrap();
-        let session = Key::new_session(now_ms(), SESSION_LIFETIME_MS).unwrap();
         let id = sign::stream_id(&stream_key.signing.verifying_key());
-        let ks = KeyStore::open(&dir.join("keys"), &path, &id).unwrap();
+        let ks = KeyStore::open_for_object_store(&dir.join("keys"), &id).unwrap();
         ks.save(&stream_key, Backend::File).unwrap();
-        Writer::create(LocalStore::open(&path).unwrap(), &stream_key, session)
+        let session = Key::new_session(now_ms(), SESSION_LIFETIME_MS).unwrap();
+        Writer::create(bucket.clone(), &stream_key, session)
             .await
             .unwrap();
         let config = format!(
-            "keys = \"keys\"\nqueue = 2\ndeadline_ms = 50\n[streams.s]\npath = \"audit\"\n\
+            "keys = \"keys\"\n[streams.s]\npath = \"s3://bucket/audit\"\n\
              [[tokens]]\nsha256 = \"{}\"\nprincipal = {{ kind = \"agent\", id = \"a\" }}",
             sign::sha256(b"t")
         );
         let config = Config::parse(&config, &dir, |_| None).unwrap();
-        (Daemon::open(&config).await.unwrap(), dir)
-    }
-
-    async fn note(d: &Daemon) -> Result<Appended, ApiError> {
-        let t = d.authenticate(Some("Bearer t")).unwrap();
-        let key = tenbri_writer::new_id(now_ms()).unwrap();
-        d.append(&t, "s", Op::Batch, Some(&key), br#"{"kind":"note"}"#)
-            .await
-    }
-
-    #[tokio::test]
-    async fn backpressure_fails_after_the_deadline() {
-        let (d, dir) = daemon("backpressure").await;
+        let stores = BTreeMap::from([("s".to_owned(), AnyStore::Bucket(bucket.clone()))]);
+        let d = Arc::new(Daemon::with_stores(&config, stores).await.unwrap());
         // No session key was saved: tenbrid certified one with the stream key it holds.
         assert!(d.ready());
-        assert!(note(&d).await.is_ok());
-        // Without a tenbri.toml nothing is checked, and nothing is warned about.
-        let t = d.authenticate(Some("bearer t")).unwrap();
-        let key = tenbri_writer::new_id(now_ms()).unwrap();
-        let a = d
-            .append(
-                &t,
-                "s",
-                Op::Intent,
-                Some(&key),
-                br#"{"action":{"type":"x"}}"#,
-            )
+
+        // Intents are replicated unless they ask for less; there is no postgres tier.
+        let intent = r#"{"action":{"type":"x"}}"#;
+        let a = append(&d, Op::Intent, intent).await.unwrap();
+        assert_eq!(a.stored.entry.durability, Some(Durability::Replicated));
+        let local = r#"{"durability":"local","action":{"type":"x"}}"#;
+        assert!(append(&d, Op::Intent, local).await.is_ok());
+        let pg = r#"{"durability":"postgres","action":{"type":"x"}}"#;
+        let e = append(&d, Op::Intent, pg).await.unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidEntry);
+
+        // Concurrent requests share batches.
+        let tasks: Vec<_> = (0..100)
+            .map(|_| {
+                let d = d.clone();
+                tokio::spawn(async move { append(&d, Op::Batch, r#"{"kind":"note"}"#).await })
+            })
+            .collect();
+        for t in tasks {
+            assert!(!t.await.unwrap().unwrap().replayed);
+        }
+        let entries = d
+            .verify(&d.authenticate(Some("Bearer t")).unwrap(), "s")
             .await
             .unwrap();
-        assert!(a.warnings.is_empty());
-        assert_eq!(d.schemas_json(), serde_json::json!({ "actions": {} }));
+        let batches = bucket.list("batches/").await.unwrap().len() as u64;
+        assert!(batches < entries.entries / 2, "{batches} batches");
 
-        // The writer busy past the deadline.
-        let lane = d.lanes["s"].clone();
-        let io = lane.io.lock().await;
-        let e = note(&d).await.unwrap_err();
-        assert_eq!(e.code, ErrorCode::DeadlineExceeded);
-        drop(io);
+        // 1,000 more: a checkpoint, in the bucket and kept with the keys.
+        let t = d.authenticate(Some("Bearer t")).unwrap();
+        let drafts = (0..1000)
+            .map(|_| {
+                let id = new_id(now_ms()).unwrap();
+                canon::parse(format!(r#"{{"kind":"note","id":"{id}"}}"#).as_bytes()).unwrap()
+            })
+            .collect();
+        assert_eq!(d.append_batch(&t, "s", drafts).await.unwrap().len(), 1000);
+        assert_eq!(bucket.list("checkpoints/").await.unwrap().len(), 1);
+        assert!(ks.dir().join(CHECKPOINT_FILE).exists());
+        let v = d.verify(&t, "s").await.unwrap();
+        assert_eq!((v.broken, v.entries), (None, entries.entries + 1000));
 
-        // The queue full past the deadline.
-        let held = lane.queue.clone().acquire_many_owned(2).await.unwrap();
-        assert_eq!(
-            note(&d).await.unwrap_err().code,
-            ErrorCode::DeadlineExceeded
-        );
-        drop(held);
-        assert!(note(&d).await.is_ok(), "room again");
-
-        // Shutdown: not ready, and flush waits for the writer.
         d.begin_shutdown();
         assert!(!d.ready());
         d.flush().await;

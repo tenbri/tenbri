@@ -5,9 +5,11 @@
 //! signed HEAD advanced by compare-and-swap, roll-forward of a batch a crashed writer left behind,
 //! and a conflict, never an overwrite, when another writer got there first. [`Lane`] shares one
 //! writer between many tasks with group commit and backpressure. A [`Hook`] runs after every HEAD
-//! the writer moves (checkpoints plug in there). [`verify`] and [`Reader`] read a stream back;
-//! [`gc`] removes what crashed writers left.
+//! the writer moves; [`Checkpoints`] is the one that writes signed checkpoints, and
+//! [`Writer::with_checkpoints`] refuses a HEAD older than the latest one. [`verify`] and
+//! [`Reader`] read a stream back; [`gc`] removes what crashed writers left.
 
+mod checkpoints;
 mod lane;
 mod read;
 
@@ -17,11 +19,14 @@ use std::io;
 use std::time::{Duration, SystemTime};
 
 use tenbri_core::{
-    Broken, Chain, Code, Entry, Error, Head, Kind, Phase, Source, Status, canon, encoding, sign,
+    Broken, Chain, Code, Entry, Error, Head, Kind, Phase, Role, Source, Status, canon, encoding,
+    sign,
 };
-use tenbri_keys::Key;
+use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
+use tenbri_merkle::Hash;
 use tenbri_store::{Object, Put, Store, Swap, Version, is_temporary};
 
+pub use checkpoints::{CHECKPOINT_FILE, Checkpoints};
 pub use lane::{Lane, LaneConfig};
 pub use read::{ReadError, Reader, Report, batch_key, batch_seq, split_batch, verify};
 
@@ -30,6 +35,10 @@ pub const RECONCILE_AFTER_MS: i64 = 3_600_000;
 
 /// How old an orphaned batch or temporary file must be before [`gc`] removes it: 1 hour.
 pub const GC_MIN_AGE: Duration = Duration::from_secs(3600);
+
+/// A writer with a key store ([`Writer::use_keys`]) replaces its session key when it has less
+/// than this left: 1 minute.
+pub const SESSION_MARGIN_MS: i64 = 60_000;
 
 #[derive(Debug)]
 pub enum WriteError {
@@ -167,19 +176,22 @@ pub fn draft_from_json(bytes: &[u8]) -> Result<Entry, Error> {
         .map_err(|e| Error::new(Code::InvalidField, e.to_string()))
 }
 
-/// What a writer just made durable: HEAD, and the entry hashes (RFC 6962 leaf hashes) of the
-/// batch `first..=head.seq` that HEAD now ends with.
-#[derive(Clone, Copy, Debug)]
+/// What a writer just made durable: HEAD, whose last batch starts at `first`, and the entry hashes
+/// (RFC 6962 leaf hashes) of the whole stream, from seq 1 to `head.seq`, the entries other writers
+/// put under HEAD included. From [`Writer::tick`], nothing new: `first` is `head.seq + 1`.
+#[derive(Clone, Copy)]
 pub struct Commit<'a> {
     pub head: &'a Head,
     pub first: u64,
-    pub hashes: &'a [String],
+    pub hashes: &'a [Hash],
+    /// The writer's session key, if it may sign a checkpoint now: certified by the stream, not
+    /// revoked, not expired.
+    pub signer: Option<&'a Key>,
 }
 
 /// Runs after every HEAD compare-and-swap this writer wins (its own batches and the ones it rolls
-/// forward), before the appends it covers return. Checkpoints plug in here. Entries between the
-/// last commit a hook saw and `first` were put under HEAD by another writer: read them from the
-/// store if they are needed. The batch is durable whatever the hook does.
+/// forward), before the appends it covers return, and on [`Writer::tick`]. [`Checkpoints`] plugs
+/// in here. The batch is durable whatever the hook does.
 pub trait Hook<S: Store>: Send {
     fn committed(&mut self, store: &S, commit: Commit<'_>) -> impl Future<Output = ()> + Send;
 }
@@ -198,6 +210,13 @@ pub struct Writer<S: Store, H = ()> {
     head: Head,
     version: Version,
     session: Option<Key>,
+    /// Where session keys are renewed from, if set.
+    keys: Option<KeyStore>,
+    /// The entry hashes of `chain`, from seq 1.
+    ///
+    /// ponytail: 32 bytes per entry in memory, as `chain` keeps every id; a compact range
+    /// (O(log n)) once checkpoint roots need only that.
+    hashes: Vec<Hash>,
     /// `chain` may hold entries HEAD does not (a write was interrupted): read the stream again
     /// before the next write.
     stale: bool,
@@ -231,6 +250,8 @@ impl<S: Store> Writer<S> {
             },
             version: Version(String::new()),
             session: None,
+            keys: None,
+            hashes: vec![],
             stale: false,
             hook: (),
             store,
@@ -251,6 +272,7 @@ impl<S: Store> Writer<S> {
             Swap::Mismatch => return Err(WriteError::Exists),
         }
         w.chain.apply(checked);
+        w.hashes.push(read::last_hash(&w.chain));
         w.batches.push(1);
         w.certify_session(stream_key, session).await?;
         Ok(w)
@@ -259,10 +281,10 @@ impl<S: Store> Writer<S> {
     /// Opens the stream in `store`, checking it from genesis against `pin` (a fingerprint), if
     /// given. A stream a revocation reaches back into still opens: the writer continues it.
     pub async fn open(store: S, pin: Option<&str>) -> Result<Writer<S>, WriteError> {
-        let (chain, batches, head) = {
+        let (chain, batches, hashes, head) = {
             let mut r = Reader::new(&store, pin);
             r.poll().await?;
-            (r.chain, r.batches, r.head)
+            (r.chain, r.batches, r.hashes, r.head)
         };
         let (head, version) = head.expect("a polled reader has a HEAD");
         Ok(Writer {
@@ -273,13 +295,17 @@ impl<S: Store> Writer<S> {
             head,
             version,
             session: None,
+            keys: None,
+            hashes,
             stale: false,
             hook: (),
         })
     }
+}
 
-    /// The same writer, calling `hook` after every HEAD it moves from now on.
-    pub fn with_hook<H: Hook<S>>(self, hook: H) -> Writer<S, H> {
+impl<S: Store, H> Writer<S, H> {
+    /// The same writer, calling `hook` after every HEAD it moves from now on, instead of its hook.
+    pub fn with_hook<H2: Hook<S>>(self, hook: H2) -> Writer<S, H2> {
         Writer {
             store: self.store,
             pin: self.pin,
@@ -288,6 +314,8 @@ impl<S: Store> Writer<S> {
             head: self.head,
             version: self.version,
             session: self.session,
+            keys: self.keys,
+            hashes: self.hashes,
             stale: self.stale,
             hook,
         }
@@ -309,6 +337,77 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
     }
     pub fn hook(&mut self) -> &mut H {
         &mut self.hook
+    }
+    /// The entry hashes (RFC 6962 leaf hashes) of the stream, from seq 1.
+    pub fn hashes(&self) -> &[Hash] {
+        &self.hashes
+    }
+
+    /// Lets the hook act on time alone, when nothing is being written (a checkpoint due after
+    /// 60 seconds): [`Lane`] calls it when idle.
+    pub async fn tick(&mut self) {
+        if self.stale {
+            return;
+        }
+        let commit = Commit {
+            head: &self.head,
+            first: self.head.seq + 1,
+            hashes: &self.hashes,
+            signer: signer(&self.chain, self.session.as_ref()),
+        };
+        self.hook.committed(&self.store, commit).await;
+    }
+
+    /// Signs with session keys from `keys` from now on, renewing the session key before it
+    /// expires: the stored one the stream certified that is valid longest, else a new one,
+    /// certified with the stream key if `keys` holds it, and saved there.
+    pub async fn use_keys(&mut self, keys: KeyStore) -> Result<(), WriteError> {
+        self.keys = Some(keys);
+        self.renew_session().await
+    }
+
+    /// With a key store, makes sure the session key is valid for at least [`SESSION_MARGIN_MS`].
+    async fn renew_session(&mut self) -> Result<(), WriteError> {
+        let now = now_ms();
+        let Some(keys) = self.keys.clone() else {
+            return Ok(());
+        };
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|s| s.valid_at(now + SESSION_MARGIN_MS))
+        {
+            return Ok(());
+        }
+        let metas = keys.list()?;
+        let mut sessions: Vec<_> = metas.iter().filter(|m| m.role == Role::Session).collect();
+        sessions.sort_by(|a, b| b.not_after.cmp(&a.not_after));
+        for m in sessions {
+            if let Ok(k) = keys.load(&m.id) {
+                if k.valid_at(now + SESSION_MARGIN_MS) && self.use_session(k).is_ok() {
+                    return Ok(());
+                }
+            }
+        }
+        let current = self
+            .chain
+            .stream_key()
+            .ok_or_else(|| WriteError::NoSession("the stream has no stream key".into()))?
+            .to_owned();
+        let stream_key = keys.load(&current).map_err(|e| {
+            WriteError::NoSession(format!(
+                "no usable session key, and the stream key {current} is not in {}: {e}",
+                keys.dir().display()
+            ))
+        })?;
+        let session = Key::new_session(now, SESSION_LIFETIME_MS)?;
+        let backend = metas
+            .iter()
+            .find(|m| m.id == current)
+            .map_or(Backend::File, |m| m.backend);
+        keys.save(&session, backend)?;
+        self.certify_session(&stream_key, session).await?;
+        Ok(())
     }
 
     /// Signs with `key` from now on: a session key this stream certified, not revoked, valid now.
@@ -384,6 +483,9 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
     /// swap for all of them. Returns each entry as stored, or why it was not: an entry that breaks
     /// a rule is refused alone, a failed write fails all of them.
     pub async fn append_batch(&mut self, entries: Vec<Entry>) -> Vec<Result<Entry, WriteError>> {
+        if let Err(e) = self.renew_session().await {
+            return entries.iter().map(|_| Err(e.again())).collect();
+        }
         let session = match &self.session {
             None => Err(WriteError::NoSession("none set".into())),
             Some(s) if !s.valid_at(now_ms()) => {
@@ -415,27 +517,32 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
         timeout_ms: i64,
         keep: Option<&str>,
     ) -> Result<Vec<Entry>, WriteError> {
+        let entries = self.stale_intents(now, timeout_ms, |id| Some(id) == keep);
+        self.append_batch(entries).await.into_iter().collect()
+    }
+
+    /// `reconcile` drafts for the intents open longer than `timeout_ms` at `now`, but `keep`.
+    fn stale_intents(&self, now: i64, timeout_ms: i64, keep: impl Fn(&str) -> bool) -> Vec<Entry> {
         let mut stale: Vec<String> = self
             .chain
             .open_intents()
             .iter()
             .filter(|(id, o)| {
                 !o.reconciled
-                    && Some(id.as_str()) != keep
+                    && !keep(id)
                     && encoding::parse_ts(&o.ts).is_some_and(|t| t + timeout_ms < now)
             })
             .map(|(id, _)| id.clone())
             .collect();
         stale.sort();
-        let entries = stale
+        stale
             .into_iter()
             .map(|id| Entry {
                 intent: Some(id),
                 status: Some(Status::Unknown),
                 ..Entry::new(Kind::Reconcile)
             })
-            .collect();
-        self.append_batch(entries).await.into_iter().collect()
+            .collect()
     }
 
     /// Reads the stream again from genesis, refusing a HEAD older than the one it had.
@@ -458,7 +565,8 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
                 ),
             }));
         }
-        (self.chain, self.batches, self.head, self.version) = (r.chain, r.batches, head, version);
+        (self.chain, self.batches, self.hashes) = (r.chain, r.batches, r.hashes);
+        (self.head, self.version) = (head, version);
         self.stale = false;
         Ok(())
     }
@@ -528,6 +636,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
                     Ok((c, line)) => {
                         hashes.push(c.hash.clone());
                         self.chain.apply(c);
+                        self.hashes.push(read::last_hash(&self.chain));
                         bytes.extend_from_slice(&line);
                         bytes.push(b'\n');
                         built.push((i, e));
@@ -576,16 +685,13 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
                     self.stale = false;
                     self.batches.push(first);
                     (self.head, self.version) = (head, v);
-                    self.hook
-                        .committed(
-                            &self.store,
-                            Commit {
-                                head: &self.head,
-                                first,
-                                hashes: &hashes,
-                            },
-                        )
-                        .await;
+                    let commit = Commit {
+                        head: &self.head,
+                        first,
+                        hashes: &self.hashes,
+                        signer: signer(&self.chain, self.session.as_ref()),
+                    };
+                    self.hook.committed(&self.store, commit).await;
                     return done(pending);
                 }
                 Swap::Mismatch => {
@@ -615,6 +721,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
             let c = self.chain.check(line).map_err(|_| conflict())?;
             hashes.push(c.hash.clone());
             self.chain.apply(c);
+            self.hashes.push(read::last_hash(&self.chain));
         }
         let last = self.chain.seq();
         let hash = hashes.last().expect("a batch has entries");
@@ -628,21 +735,31 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
                 self.stale = false;
                 self.batches.push(seq);
                 (self.head, self.version) = (head, v);
-                self.hook
-                    .committed(
-                        &self.store,
-                        Commit {
-                            head: &self.head,
-                            first: seq,
-                            hashes: &hashes,
-                        },
-                    )
-                    .await;
+                let commit = Commit {
+                    head: &self.head,
+                    first: seq,
+                    hashes: &self.hashes,
+                    signer: signer(&self.chain, self.session.as_ref()),
+                };
+                self.hook.committed(&self.store, commit).await;
                 Ok(())
             }
             Swap::Mismatch => self.reload().await,
         }
     }
+}
+
+/// `session`, if it may sign a checkpoint of `chain` now: a session key the stream certified, not
+/// revoked, not expired.
+fn signer<'a>(chain: &Chain, session: Option<&'a Key>) -> Option<&'a Key> {
+    session.filter(|k| {
+        k.valid_at(now_ms())
+            && chain.key(&k.id).is_some_and(|i| {
+                i.role == Role::Session
+                    && i.revoked_from.is_none()
+                    && i.public == k.signing.verifying_key()
+            })
+    })
 }
 
 /// `e` as an intent: a decision, phase `intent`, source `sdk` unless set.
