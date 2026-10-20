@@ -12,8 +12,9 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
-use tenbri_core::{Entry, Head, Principal, PrincipalKind, Role, canon, sign};
+use tenbri_core::{Entry, Head, Principal, PrincipalKind, Role, canon, encoding, sign};
 use tenbri_crypt::{DataKeys, epoch_note, erasure_note};
+use tenbri_index::{Filter, State};
 use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
 use tenbri_merkle::Note;
 use tenbri_schema::{Schemas, Unknown};
@@ -37,6 +38,8 @@ struct Cli {
     command: Command,
 }
 
+// Parsed once per run: the size of the largest variant (query's filters) does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Command {
     /// Create a stream and its stream key; print the fingerprint to pin.
@@ -62,17 +65,62 @@ enum Command {
         #[arg(long, value_name = "FILE")]
         checkpoint: Option<PathBuf>,
     },
-    /// Print entries by input or action, each with its verification status, one JSON per line.
+    /// Print the entries matching every filter given, in sequence order, one JSON per line, each
+    /// with its verification status, seq, entry hash and what the answer is current to.
+    ///
+    /// Uses the stream's index when there is one (`tenbri index rebuild`), bringing it up to HEAD
+    /// first; its answers are "indexed" until `--verify` checks them against the stream. Without
+    /// an index, reads and verifies the whole stream.
     Query {
         path: String,
-        /// An input the entry used, as ref@version (policy:refund@14); repeat to require several.
+        /// An input the entry used, as ref@version (policy:refund@14), or ref for any version;
+        /// repeat to require several.
         #[arg(long, value_name = "REF@VERSION")]
         input: Vec<String>,
         /// The action type (reply_ticket).
         #[arg(long, value_name = "TYPE")]
         action: Option<String>,
+        /// The principal, as kind:id (agent:support-assistant).
+        #[arg(long, value_name = "KIND:ID")]
+        principal: Option<String>,
+        /// The action target, exactly.
+        #[arg(long)]
+        target: Option<String>,
+        /// The subject handle.
+        #[arg(long)]
+        subject: Option<String>,
+        /// The rule, as ref@version, or ref for any version.
+        #[arg(long, value_name = "REF@VERSION")]
+        rule: Option<String>,
+        /// Entries at or after this time: 2026-10-20T09:00:00Z, 2026-10-20, or 1h, 30m, 7d ago.
+        #[arg(long, value_name = "TIME")]
+        since: Option<String>,
+        /// Entries before this time.
+        #[arg(long, value_name = "TIME")]
+        until: Option<String>,
+        /// The OpenTelemetry trace id.
+        #[arg(long, value_name = "TRACE_ID")]
+        trace: Option<String>,
+        /// An outcome's status: ok, error, refused or unknown.
+        #[arg(long)]
+        status: Option<String>,
+        /// Only entries after this sequence number (the cursor of the previous page).
+        #[arg(long, value_name = "SEQ", default_value_t = 0)]
+        after: u64,
+        /// At most this many entries; the next page's --after is printed on stderr.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Check the index's answers against the stream, read and verified in full.
+        #[arg(long)]
+        verify: bool,
         #[arg(long, value_name = "FINGERPRINT")]
         key: Option<String>,
+    },
+    /// The stream's index: a derived view `query` uses, kept in $TENBRI_INDEX_DIR or the user's
+    /// cache directory; deleting it loses nothing.
+    Index {
+        #[command(subcommand)]
+        command: IndexCommand,
     },
     /// Print the last entries, then follow new ones as they are written.
     Tail {
@@ -162,6 +210,17 @@ enum SchemaCommand {
         /// The schema file.
         #[arg(long, default_value = "tenbri.toml", value_name = "FILE")]
         schema: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum IndexCommand {
+    /// Delete the stream's index and build it again from every batch.
+    Rebuild {
+        path: String,
+        /// The backend: sqlite (one file) or parquet (files any Arrow tool reads).
+        #[arg(long, default_value = "sqlite")]
+        backend: tenbri_index::Kind,
     },
 }
 
@@ -279,37 +338,63 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
             path,
             input,
             action,
+            principal,
+            target,
+            subject,
+            rule,
+            since,
+            until,
+            trace,
+            status,
+            after,
+            limit,
+            verify,
             key,
         } => {
             let pin = key.as_deref().map(pin).transpose()?;
-            let inputs: Vec<(&str, &str)> = input
-                .iter()
-                .map(|i| {
-                    i.rsplit_once('@')
-                        .ok_or_else(|| Fail(2, format!("--input {i}: expected ref@version")))
-                })
-                .collect::<Result<_, _>>()?;
-            let store = store(path).await?;
-            let mut r = Reader::new(&store, pin.as_deref());
-            let entries = read(&mut r).await?;
-            if let Some(b) = r.chain().invalidated() {
-                return Err(Fail(1, format!("the stream does not verify: {b}")));
-            }
-            let status = if pin.is_some() {
-                "verified"
-            } else {
-                "unpinned"
+            let now = now_ms();
+            let time = |t: &Option<String>, flag: &str| {
+                t.as_deref()
+                    .map(|t| {
+                        tenbri_index::parse_time(t, now).ok_or_else(|| {
+                            Fail(2, format!("--{flag} {t}: expected a time (2026-10-20T09:00:00Z, 2026-10-20) or a duration (1h)"))
+                        })
+                    })
+                    .transpose()
             };
-            let mut out = io::stdout().lock();
-            for e in entries
-                .iter()
-                .filter(|e| matches(e, &inputs, action.as_deref()))
-            {
-                writeln!(
-                    out,
-                    "{{\"verification\":\"{status}\",\"entry\":{}}}",
-                    line(e)
-                )?;
+            let filter = Filter {
+                inputs: input.iter().map(|i| tenbri_index::ref_version(i)).collect(),
+                action: action.clone(),
+                principal: principal.clone(),
+                target: target.clone(),
+                subject: subject.clone(),
+                rule: rule.as_deref().map(tenbri_index::ref_version),
+                since: time(since, "since")?,
+                until: time(until, "until")?,
+                trace_id: trace.clone(),
+                status: status.clone(),
+                after: *after,
+            };
+            let limit = limit.unwrap_or(usize::MAX);
+            let store = store(path).await?;
+            query(&store, &filter, limit, *verify, pin.as_deref()).await
+        }
+        Command::Index {
+            command: IndexCommand::Rebuild { path, backend },
+        } => {
+            let store = store(path).await?;
+            let dir = index_dir(&store).await?;
+            tenbri_index::remove(&dir)?;
+            let mut ix = tenbri_index::open(*backend, &dir)?;
+            let st = tenbri_index::rebuild(ix.as_mut(), &store).await?;
+            println!(
+                "indexed {} entries of {} ({backend}) at {}",
+                st.seq,
+                st.stream,
+                dir.display()
+            );
+            if let Some(c) = st.checkpoint {
+                println!("latest checkpoint: size {c}");
             }
             Ok(0)
         }
@@ -458,6 +543,111 @@ async fn keys_list(path: &str, keys: &Path) -> Result<u8, Fail> {
     Ok(0)
 }
 
+/// Where the index of the stream in `store` lives.
+async fn index_dir<S: Store>(store: &S) -> Result<PathBuf, Fail> {
+    let head = store
+        .get("HEAD")
+        .await?
+        .ok_or_else(|| Fail(2, "no stream here (no HEAD)".into()))?;
+    let (head, _) = Head::parse(&head.bytes)?;
+    let root = tenbri_index::default_root()
+        .ok_or_else(|| Fail(2, "no index directory: set TENBRI_INDEX_DIR".into()))?;
+    Ok(tenbri_index::dir_for(&root, &head.stream))
+}
+
+/// `tenbri query`: through the index if the stream has one, else a verified scan.
+async fn query<S: Store>(
+    store: &S,
+    filter: &Filter,
+    limit: usize,
+    check: bool,
+    pin: Option<&str>,
+) -> Result<u8, Fail> {
+    let verified = if pin.is_some() {
+        "verified"
+    } else {
+        "unpinned"
+    };
+    let ix = tenbri_index::find(&index_dir(store).await?)?;
+    let (hits, next, state, status) = match ix {
+        Some(mut ix) => {
+            tenbri_index::update(ix.as_mut(), store).await?;
+            let page = tenbri_index::search(ix.as_ref(), filter, limit)?;
+            let state = page.state.expect("an index brought up to HEAD has a state");
+            let mut status = "indexed";
+            if check {
+                // ponytail: re-reads the whole stream; check each hit's inclusion proof against
+                // a checkpoint once receipts land.
+                let mut r = Reader::new(store, pin);
+                read(&mut r).await?;
+                if let Some(b) = r.chain().invalidated() {
+                    return Err(Fail(1, format!("the stream does not verify: {b}")));
+                }
+                for h in &page.hits {
+                    let want = r.hashes().get(h.seq as usize - 1).map(|x| encoding::hex(x));
+                    if want.as_deref() != h.hash.strip_prefix("sha256:") {
+                        return Err(Fail(
+                            1,
+                            format!(
+                                "the index disagrees with the stream at seq {}: run `tenbri index rebuild`",
+                                h.seq
+                            ),
+                        ));
+                    }
+                }
+                status = verified;
+            }
+            (page.hits, page.next, state, status)
+        }
+        None => {
+            let mut r = Reader::new(store, pin);
+            let entries = read(&mut r).await?;
+            if let Some(b) = r.chain().invalidated() {
+                return Err(Fail(1, format!("the stream does not verify: {b}")));
+            }
+            let mut hits = vec![];
+            let mut next = None;
+            for (e, h) in entries.iter().zip(r.hashes()) {
+                let l = line(e);
+                if !filter.matches_entry(e, &l) {
+                    continue;
+                }
+                if hits.len() == limit {
+                    next = hits.last().map(|h: &tenbri_index::Hit| h.seq);
+                    break;
+                }
+                hits.push(tenbri_index::Hit {
+                    seq: e.seq,
+                    hash: format!("sha256:{}", encoding::hex(h)),
+                    line: l,
+                });
+            }
+            let head = r.head().expect("a stream read to its HEAD");
+            let state = State {
+                stream: head.stream.clone(),
+                seq: head.seq,
+                hash: head.hash.clone(),
+                checkpoint: None,
+            };
+            (hits, next, state, verified)
+        }
+    };
+    let as_of = serde_json::to_string(&state)?;
+    let mut out = io::stdout().lock();
+    for h in hits {
+        writeln!(
+            out,
+            "{{\"verification\":\"{status}\",\"entry\":{},\"seq\":{},\"hash\":\"{}\",\"as_of\":{as_of}}}",
+            h.line, h.seq, h.hash
+        )?;
+    }
+    out.flush()?;
+    if let Some(n) = next {
+        eprintln!("tenbri: more entries match; next page: --after {n}");
+    }
+    Ok(0)
+}
+
 async fn schema_check(file: &Path, paths: &[String]) -> Result<u8, Fail> {
     let schemas = Schemas::load(file).map_err(|e| Fail(2, e))?;
     println!(
@@ -545,17 +735,6 @@ fn print_lines(entries: &[Entry]) -> io::Result<()> {
         writeln!(out, "{}", line(e))?;
     }
     out.flush()
-}
-
-fn matches(e: &Entry, inputs: &[(&str, &str)], action: Option<&str>) -> bool {
-    let has = |(r, v): &(&str, &str)| {
-        e.inputs
-            .iter()
-            .flatten()
-            .any(|i| i.r#ref == *r && i.version == *v)
-    };
-    inputs.iter().all(has)
-        && action.is_none_or(|a| e.action.as_ref().is_some_and(|x| x.r#type == a))
 }
 
 async fn init(path: &str, keys: &Path, backend: Backend) -> Result<u8, Fail> {
