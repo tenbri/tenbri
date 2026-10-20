@@ -18,6 +18,7 @@ homepage = "https://github.com/tenbri/tenbri"
 [workspace.dependencies]
 tenbri-core = { path = "crates/tenbri-core", version = "0.1.0-alpha.2" }
 tenbri-crypt = { path = "crates/tenbri-crypt", version = "0.1.0-alpha.2" }
+tenbri-index = { path = "crates/tenbri-index", version = "0.1.0-alpha.2" }
 tenbri-keys = { path = "crates/tenbri-keys", version = "0.1.0-alpha.2" }
 tenbri-merkle = { path = "crates/tenbri-merkle", version = "0.1.0-alpha.2" }
 tenbri-otlp = { path = "crates/tenbri-otlp", version = "0.1.0-alpha.2" }
