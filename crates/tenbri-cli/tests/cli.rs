@@ -131,6 +131,51 @@ fn round_trip() {
     std::fs::remove_dir_all(&t).unwrap();
 }
 
+#[test]
+fn schema_check() {
+    let t = std::env::temp_dir().join(format!("tenbri-cli-schema-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&t);
+    let (keys, s) = (t.join("keys"), t.join("audit").join("support"));
+    let st = s.to_str().unwrap();
+    assert!(tenbri(&keys, &["init", st], "").status.success());
+    let intent = r#"{"kind":"decision","phase":"intent","source":"sdk","principal":{"kind":"agent","id":"a"},"action":{"type":"reply_ticket","target":"zendesk:ticket/1"}}"#;
+    assert!(tenbri(&keys, &["append", st], intent).status.success());
+
+    let check = |toml: &str| {
+        let f = t.join("tenbri.toml");
+        std::fs::write(&f, toml).unwrap();
+        tenbri(
+            &keys,
+            &["schema", "check", "--schema", f.to_str().unwrap(), st],
+            "",
+        )
+    };
+    let o = check("[actions.reply_ticket]\ntarget = \"zendesk:ticket/*\"");
+    assert_eq!(o.status.code(), Some(0), "{o:?}");
+    assert!(
+        out(&o).contains("3 entries, 0 break their schema"),
+        "{}",
+        out(&o)
+    );
+
+    let o = check("[actions.reply_ticket]\nrule = true");
+    assert_eq!(o.status.code(), Some(1), "{o:?}");
+    assert!(out(&o).contains("seq 3: rule: required"), "{}", out(&o));
+
+    // An undeclared action fails by default and is a warning when configured so.
+    assert_eq!(check("").status.code(), Some(1));
+    let o = check("unknown_actions = \"warn\"");
+    assert_eq!(o.status.code(), Some(0), "{o:?}");
+    assert!(out(&o).contains("warning: `reply_ticket` is not declared"));
+
+    // A typo in tenbri.toml is an error, before any stream is read.
+    assert_eq!(
+        check("[actions.reply_ticket]\nrul = true").status.code(),
+        Some(2)
+    );
+    std::fs::remove_dir_all(&t).unwrap();
+}
+
 /// `verify --checkpoint` on the stream cases of spec/vectors/checkpoints.json, each laid out on
 /// disk with one entry per batch and a HEAD signed by `sess:a1`.
 #[test]

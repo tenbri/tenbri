@@ -1,0 +1,478 @@
+openapi: 3.1.0
+info:
+  title: tenbrid
+  description: |-
+    The Tenbri network API: append decisions to tamper-evident streams, read them back with their verification status, verify streams. The same operations are served over gRPC (contract/proto/tenbri/v1/tenbri.proto).
+
+    Every request but /v1/health and /v1/ready carries `Authorization: Bearer <token>`; each token is bound to one principal, and entries it writes carry that principal.
+
+    Every write carries an `Idempotency-Key`: the entry id, a ULID the client generates. The same key with the same draft returns the original entry (200, `replayed: true`); the same key with another draft fails with TENBRI_IDEMPOTENCY_CONFLICT. Batches carry each entry's `id` instead.
+
+    Errors have one body, `{"error": {"code", "message", "reason"?, "violations"?}}`, with a stable code: TENBRI_INVALID_REQUEST (400), TENBRI_INVALID_ENTRY (400, `reason` is the format v1 code), TENBRI_SCHEMA_VIOLATION (422), TENBRI_UNAUTHENTICATED (401), TENBRI_FORBIDDEN (403), TENBRI_NOT_FOUND (404), TENBRI_IDEMPOTENCY_CONFLICT (409), TENBRI_WRITE_CONFLICT (409), TENBRI_DEADLINE_EXCEEDED (503, backpressure), TENBRI_STORE_UNAVAILABLE (503), TENBRI_NO_SESSION_KEY (503), TENBRI_TAIL_LAGGED (503), TENBRI_STREAM_BROKEN (500), TENBRI_INTERNAL (500). A 503 carries Retry-After.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+  version: '1'
+paths:
+  /v1/health:
+    get:
+      summary: 'Liveness: the process answers.'
+      operationId: health
+      responses:
+        '200':
+          description: Alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusBody'
+  /v1/ready:
+    get:
+      summary: 'Readiness: not shutting down, and every stream verifies and has a session key.'
+      operationId: ready
+      responses:
+        '200':
+          description: Ready for writes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusBody'
+        '503':
+          description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusBody'
+  /v1/schemas:
+    get:
+      summary: The action schemas declared in tenbri.toml.
+      operationId: list_schemas
+      responses:
+        '200':
+          description: 'tenbri.toml as JSON: {unknown_actions, actions: {type: schema}}'
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
+  /v1/streams/{stream}/approvals:
+    post:
+      summary: Append an approval.
+      operationId: append_approval
+      parameters:
+      - name: stream
+        in: path
+        description: The stream's name or id
+        required: true
+        schema:
+          type: string
+      - name: Idempotency-Key
+        in: header
+        description: 'The entry id: a ULID the client generates'
+        required: true
+        schema:
+          type: string
+      requestBody:
+        description: 'A draft approval: `action` approved, by the token''s principal.'
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: 'Replayed: the entry this key wrote before'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppendedBody'
+        '201':
+          description: Written and durable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppendedBody'
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
+  /v1/streams/{stream}/entries:
+    get:
+      summary: Entries matching every filter given, in sequence order.
+      operationId: query_entries
+      parameters:
+      - name: stream
+        in: path
+        description: The stream's name or id
+        required: true
+        schema:
+          type: string
+      - name: input
+        in: query
+        description: An input the entry used, as ref@version (policy:refund@14); repeat to require several
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+      - name: action
+        in: query
+        description: The action type (reply_ticket)
+        required: false
+        schema:
+          type: string
+      - name: principal
+        in: query
+        description: kind:id (agent:support-assistant)
+        required: false
+        schema:
+          type: string
+      - name: target
+        in: query
+        description: The action target, exactly
+        required: false
+        schema:
+          type: string
+      - name: subject
+        in: query
+        description: The subject handle
+        required: false
+        schema:
+          type: string
+      - name: after_seq
+        in: query
+        description: Only entries with a greater sequence number
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: limit
+        in: query
+        description: 'At most this many entries: default 100, at most 1000'
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      responses:
+        '200':
+          description: The matching entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryBody'
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
+    post:
+      summary: |-
+        Append several entries in order, up to 1000. All are checked before any is written; if
+        storage fails part-way, the earlier ones stay written and retrying the batch is safe.
+      operationId: append_batch
+      parameters:
+      - name: stream
+        in: path
+        description: The stream's name or id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+        required: true
+      responses:
+        '200':
+          description: Every entry is durable (or was replayed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchBody'
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
+  /v1/streams/{stream}/entries/{id}:
+    get:
+      summary: One entry by id.
+      operationId: get_entry
+      parameters:
+      - name: stream
+        in: path
+        description: The stream's name or id
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        description: The entry id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueriedBody'
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
+  /v1/streams/{stream}/intents:
+    post:
+      summary: Append an intent; returns once it is durable, before the action runs.
+      operationId: append_intent
+      parameters:
+      - name: stream
+        in: path
+        description: The stream's name in tenbrid's configuration, or its id (tnb1:...)
+        required: true
+        schema:
+          type: string
+      - name: Idempotency-Key
+        in: header
+        description: 'The entry id: a ULID the client generates'
+        required: true
+        schema:
+          type: string
+      requestBody:
+        description: 'A draft intent (spec/format-v1.md): action, inputs, rule, subject, approval, trace, links, ext... `kind` and `phase` may be left out; `principal` defaults to the token''s; `source` to sdk; `durability` to local.'
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: 'Replayed: the entry this key wrote before'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppendedBody'
+        '201':
+          description: Written and durable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppendedBody'
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
+  /v1/streams/{stream}/outcomes:
+    post:
+      summary: Append the outcome of an intent.
+      operationId: append_outcome
+      parameters:
+      - name: stream
+        in: path
+        description: The stream's name or id
+        required: true
+        schema:
+          type: string
+      - name: Idempotency-Key
+        in: header
+        description: 'The entry id: a ULID the client generates'
+        required: true
+        schema:
+          type: string
+      requestBody:
+        description: 'A draft outcome: `intent` (the intent''s id) and `status` (ok, error, refused, unknown). `principal`, `action`, `subject` and `source` default to the intent''s.'
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: 'Replayed: the entry this key wrote before'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppendedBody'
+        '201':
+          description: Written and durable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppendedBody'
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
+  /v1/streams/{stream}/tail:
+    get:
+      summary: |-
+        Server-sent events: the entries after `after_seq` (or the Last-Event-ID header), then new ones
+        as they are written. Each `entry` event's id is the entry's sequence number and its data a
+        QueriedBody; an `error` event carrying an ErrorBody ends the stream.
+      operationId: tail_entries
+      parameters:
+      - name: stream
+        in: path
+        description: The stream's name or id
+        required: true
+        schema:
+          type: string
+      - name: after_seq
+        in: query
+        description: Start after this sequence number; default 0
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: Last-Event-ID
+        in: header
+        description: Resume after this sequence number, when after_seq is absent
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+      responses:
+        '200':
+          description: An event stream of `entry` events
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/QueriedBody'
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
+  /v1/streams/{stream}/verify:
+    get:
+      summary: |-
+        Read the whole stream from storage and check it against its pinned key: canonical bytes,
+        chain, signatures, keys, intents, HEAD.
+      operationId: verify_stream
+      parameters:
+      - name: stream
+        in: path
+        description: The stream's name or id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The report; `broken` is absent when the stream verifies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyBody'
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
+components:
+  schemas:
+    ApiError:
+      type: object
+      required:
+      - code
+      - message
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+        reason:
+          type:
+          - string
+          - 'null'
+          description: The format v1 error code, for TENBRI_INVALID_ENTRY and TENBRI_STREAM_BROKEN.
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Violation'
+          description: For TENBRI_SCHEMA_VIOLATION.
+    ErrorBody:
+      type: object
+      description: 'A failed request: the body of every REST error and of gRPC''s `tenbri-error-bin`.'
+      required:
+      - error
+      properties:
+        error:
+          $ref: '#/components/schemas/ApiError'
+    ErrorCode:
+      type: string
+      description: |-
+        A stable error code. REST returns it in the body with the HTTP status below; gRPC returns the
+        gRPC status below with the code in the `tenbri-error-code` metadata.
+      enum:
+      - TENBRI_INVALID_REQUEST
+      - TENBRI_INVALID_ENTRY
+      - TENBRI_SCHEMA_VIOLATION
+      - TENBRI_UNAUTHENTICATED
+      - TENBRI_FORBIDDEN
+      - TENBRI_NOT_FOUND
+      - TENBRI_IDEMPOTENCY_CONFLICT
+      - TENBRI_WRITE_CONFLICT
+      - TENBRI_DEADLINE_EXCEEDED
+      - TENBRI_STORE_UNAVAILABLE
+      - TENBRI_NO_SESSION_KEY
+      - TENBRI_STREAM_BROKEN
+      - TENBRI_TAIL_LAGGED
+      - TENBRI_INTERNAL
+    Violation:
+      type: object
+      description: A schema requirement the entry does not meet.
+      required:
+      - path
+      - message
+      properties:
+        message:
+          type: string
+        path:
+          type: string
+          description: The member, as a dotted path (`action.type`, `rule.result`).
+  securitySchemes:
+    token:
+      type: http
+      scheme: bearer
