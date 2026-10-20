@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/mascot.webp" width="220" alt="Tenbri's mascot: a pangolin detective in a deerstalker, holding a magnifying glass and a notebook">
+  <img src="docs/assets/mascot.webp" width="220" alt="Tenbri's mascot: a pangolin detective in a deerstalker, holding a magnifying glass">
 </p>
 
 <h1 align="center">Tenbri</h1>
