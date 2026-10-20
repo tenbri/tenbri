@@ -32,7 +32,7 @@ from openai.types.responses import (
     ResponseOutputRefusal,
     ResponseOutputText,
 )
-from tenbri import AsyncTenbri, Entry, TenbriError
+from tenbri import AsyncTenbri, Entry, Tenbri, TenbriError
 
 from tenbri_openai_agents import TenbriRecorder
 
@@ -305,3 +305,66 @@ def test_tool_selection_and_failing_closed_or_open(
         assert "a@example.com" in ran and "fail_open" in caplog.text
 
     asyncio.run(main())
+
+
+def test_instrument_one_liner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """tenbri.init() and tenbri.instrument_openai_agents(): plain Runner.run and RunState answers
+    are recorded, the action mapped by a dict, the approver from the environment."""
+    import tenbri
+
+    from tenbri_openai_agents import uninstrument
+
+    monkeypatch.setenv("TENBRI_APPROVER", "person:alice")
+    ran: list[str] = []
+
+    async def over_50(ctx: Any, args: dict[str, Any], call_id: str) -> bool:
+        return bool(args["amount"] > 50)
+
+    @function_tool(needs_approval=over_50)
+    def issue_refund(charge: str, amount: int) -> str:
+        ran.append(charge)
+        return "refunded"
+
+    agent = Agent(
+        name="support",
+        tools=[issue_refund],
+        model=Scripted(
+            [call("issue_refund", "c1", charge="ch_1", amount=20)],
+            [call("issue_refund", "c2", charge="ch_2", amount=80), call("issue_refund", "c3", charge="ch_3", amount=90)],
+            [say("done")],
+        ),
+    )
+    log = tenbri.init(tmp_path / "audit", keys=tmp_path / "keys")
+    tenbri.instrument_openai_agents(
+        actions={"issue_refund": {"target": "stripe:{charge}", "policy": "policy:refund@14"}}
+    )
+
+    async def main() -> None:
+        result = await Runner.run(agent, "refund ch_1, then ch_2 and ch_3")
+        state = result.to_state()
+        for item in result.interruptions:
+            (state.approve if item.call_id == "c2" else state.reject)(item)
+        await Runner.run(agent, state)
+
+    try:
+        asyncio.run(main())
+    finally:
+        uninstrument()
+        log.close()
+    assert ran == ["ch_1", "ch_2"]
+    log = Tenbri.open(tmp_path / "audit", keys=tmp_path / "keys")
+    es = [m.entry for m in log.query() if m.entry["kind"] in ("decision", "approval")]
+    assert [brief(e) for e in es] == [
+        ("intent", "issue_refund", "", "agent:support"),
+        ("outcome", "issue_refund", "ok", "agent:support"),
+        ("approval", "issue_refund", "", "person:alice"),
+        ("intent", "issue_refund", "", "agent:support"),
+        ("outcome", "issue_refund", "refused", "person:alice"),
+        ("intent", "issue_refund", "", "agent:support"),
+        ("outcome", "issue_refund", "ok", "agent:support"),
+    ]
+    assert es[0]["action"] == {"type": "issue_refund", "target": "stripe:ch_1"}
+    assert es[0]["rule"] == {"ref": "policy:refund", "version": "14", "result": "allow"}
+    assert es[3]["action"]["target"] == "stripe:ch_3"  # refused
+    assert es[5]["approval"]["by"] == {"kind": "person", "id": "alice"}  # ch_2, approved
+    assert log.verify(log.fingerprint).ok

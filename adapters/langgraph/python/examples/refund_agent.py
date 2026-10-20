@@ -11,15 +11,16 @@ from __future__ import annotations
 import tempfile
 from typing import Any
 
+import tenbri
+
 from langchain.agents import create_agent
 from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
-from tenbri import Refused, Tenbri
-
-from tenbri_langgraph import TenbriCallbackHandler
+from langgraph.types import Command
+from tenbri import Refused
 
 
 @tool
@@ -56,16 +57,9 @@ model = Scripted(
 )
 
 with tempfile.TemporaryDirectory() as d:
-    log = Tenbri.open(
-        f"{d}/support",
-        keys=f"{d}/keys",
-        create=True,
-        digest_key=b"a 32-byte secret, kept apart....",
-    )
-    tenbri = TenbriCallbackHandler(
-        log,
-        target=lambda tool, args: f"stripe:{args['charge']}",
-        inputs=lambda tool, args: [("policy:refund", "14", b"refunds over 50 EUR need a person")],
+    log = tenbri.init(f"{d}/support", keys=f"{d}/keys", approver="person:alice")
+    tenbri.instrument_langchain(
+        actions={"issue_refund": {"target": "stripe:{charge}", "policy": "policy:refund@14"}}
     )
     agent = create_agent(
         model,
@@ -84,7 +78,7 @@ with tempfile.TemporaryDirectory() as d:
         ],
         checkpointer=InMemorySaver(),
     )
-    config: Any = {"callbacks": [tenbri], "configurable": {"thread_id": "ticket-42"}}
+    config: Any = {"configurable": {"thread_id": "ticket-42"}}
 
     agent.invoke({"messages": [("user", "Refund 20 EUR of ch_1")]}, config)
     agent.invoke({"messages": [("user", "Refund 120 EUR of ch_2")]}, config)
@@ -92,12 +86,9 @@ with tempfile.TemporaryDirectory() as d:
         "waiting for a person:",
         [i.value["action_requests"] for i in agent.get_state(config).interrupts],
     )
-    agent.invoke(
-        tenbri.resume(agent, config, {"decisions": [{"type": "approve"}]}, by="person:alice"),
-        config,
-    )
+    # Recorded as an approval by person:alice.
+    agent.invoke(Command(resume={"decisions": [{"type": "approve"}]}), config)
 
-    log.flush()
     for m in log.query():
         e = m.entry
         if e["kind"] in ("decision", "approval"):

@@ -4,14 +4,14 @@ Before a tool runs, its intent is durable in the stream; after, its outcome foll
 ``error``, ``refused``, or ``unknown`` when interrupted). A tool approved through the SDK's
 ``can_use_tool`` is recorded as an ``approval`` entry, which the outcome names.
 
-    from claude_agent_sdk import ClaudeAgentOptions, query
-    from tenbri import AsyncTenbri
-    from tenbri_claude_agent_sdk import TenbriHooks
+    import tenbri
 
-    log = await AsyncTenbri.open("./audit/support", create=True)
-    options = TenbriHooks(log, "agent:support").instrument(ClaudeAgentOptions(...))
-    async for message in query(prompt="...", options=options):
-        ...
+    tenbri.init(agent="agent:support")
+    tenbri.instrument_claude_agent_sdk()
+    # every query() and ClaudeSDKClient from here on is recorded
+
+:func:`instrument` is that, with its options. :class:`TenbriHooks` is the lower level: one
+session's hooks, on a stream you opened.
 """
 
 from __future__ import annotations
@@ -32,14 +32,15 @@ from claude_agent_sdk import (
     PermissionResultDeny,
     ToolPermissionContext,
 )
-from tenbri import AsyncTenbri, Entry, InvalidRequestError, Principal, Status
+from tenbri import AsyncTenbri, Entry, Principal, Status, TenbriError
+from tenbri import _auto as auto
 
 try:
     from opentelemetry import trace as _otel
 except ImportError:  # OpenTelemetry is optional: without it, entries carry no trace.
     _otel = None  # type: ignore[assignment]
 
-__all__ = ["TenbriHooks", "default_describe", "entry_hash"]
+__all__ = ["TenbriHooks", "default_describe", "entry_hash", "instrument", "uninstrument"]
 
 _log = logging.getLogger(__name__)
 
@@ -191,10 +192,10 @@ class TenbriHooks:
             action["target"] = target
         inputs = list(fields.pop("inputs", []))
         try:
-            digest = self._log.digest(_canonical(tool_input))
+            digest = self._log.digest(_canonical(tool_input), subject=fields.get("subject"))
             inputs.append({"ref": "claude:tool_input", "version": tid, "digest": digest})
-        except InvalidRequestError:
-            pass  # no digest_key at open: nothing to pin with
+        except TenbriError:
+            pass  # no key to digest with here: the intent says why
         draft = {**fields, "action": action, "principal": self._principal}
         if inputs:
             draft["inputs"] = inputs
@@ -247,3 +248,78 @@ def _traced(draft: dict[str, Any]) -> dict[str, Any]:
     if (t := _trace()) is not None:
         draft["trace"] = t
     return draft
+
+
+_originals: dict[str, Any] = {}
+
+
+def instrument(
+    *,
+    actions: auto.Actions | None = None,
+    agent: Principal | None = None,
+    approver: Approver | None = None,
+    tools: Iterable[str] | Callable[[str], bool] | None = None,
+    fail_open: bool | None = None,
+    timeout: float = 2.0,
+) -> None:
+    """Records the tool calls of every Claude Agent SDK session from now on, ``query()`` and
+    ``ClaudeSDKClient`` alike, on the stream ``tenbri.init()`` opened (``tenbri.
+    instrument_claude_agent_sdk()`` calls this).
+
+    Each tool call is the action of its name, or of the action schema in tenbri.toml whose name
+    it ends with (``mcp__billing__issue_refund`` is ``issue_refund``): the schema's ``target``
+    (``stripe:{charge}``) is filled from the tool's input and its ``policy`` is the rule.
+    ``actions`` overrides that per tool name: ``{"mcp__billing__issue_refund": {"action":
+    "issue_refund", "target": "stripe:{charge}", "policy": "policy:refund@14"}}``. File and web
+    tools record their path or URL as the target.
+
+    ``agent`` is who acts (default: ``tenbri.agent()``, else ``init(agent=...)``); ``approver``
+    who allows a tool through ``can_use_tool`` (a principal, or a function of the call; default
+    ``init(approver=...)`` or ``TENBRI_APPROVER``). ``tools``, ``fail_open`` and ``timeout`` are
+    :class:`TenbriHooks`'s; ``fail_open`` defaults to ``init()``'s."""
+    from claude_agent_sdk import ClaudeSDKClient
+    from claude_agent_sdk._internal.client import InternalClient
+
+    uninstrument()
+
+    def describe(tool: str, tool_input: dict[str, Any]) -> Mapping[str, Any] | None:
+        return {**(default_describe(tool, tool_input) or {}), **auto.describe(tool, tool_input, actions)}
+
+    def hooks() -> TenbriHooks:
+        d = auto.default()
+        return TenbriHooks(
+            d.aio,
+            auto.who(agent),
+            tools=tools,
+            describe=describe,
+            approver=lambda tool, tool_input, ctx: auto.approver(approver, tool, tool_input, ctx),
+            fail_open=d.fail_open if fail_open is None else fail_open,
+            timeout=timeout,
+        )
+
+    process_query = _originals["process_query"] = InternalClient.process_query
+    init = _originals["init"] = ClaudeSDKClient.__init__
+
+    def instrumented_query(self: Any, *args: Any, **kwargs: Any) -> Any:
+        if "options" in kwargs:
+            kwargs["options"] = hooks().instrument(kwargs["options"])
+        else:
+            args = (args[0], hooks().instrument(args[1]), *args[2:])
+        return process_query(self, *args, **kwargs)
+
+    def instrumented_init(self: Any, *args: Any, **kwargs: Any) -> None:
+        init(self, *args, **kwargs)
+        self.options = hooks().instrument(self.options)
+
+    InternalClient.process_query = instrumented_query  # type: ignore[method-assign]
+    ClaudeSDKClient.__init__ = instrumented_init  # type: ignore[method-assign]
+
+
+def uninstrument() -> None:
+    """Stops recording sessions started from now on."""
+    from claude_agent_sdk import ClaudeSDKClient
+    from claude_agent_sdk._internal.client import InternalClient
+
+    if "process_query" in _originals:
+        InternalClient.process_query = _originals.pop("process_query")  # type: ignore[method-assign]
+        ClaudeSDKClient.__init__ = _originals.pop("init")  # type: ignore[method-assign]

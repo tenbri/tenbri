@@ -8,16 +8,13 @@
 // person:$USER. Then the stream is verified and its decisions listed.
 import { userInfo } from 'node:os'
 import { createInterface } from 'node:readline/promises'
-import {
-  createSdkMcpServer,
-  query,
-  tool,
-  type CanUseTool,
-  type SDKUserMessage,
-} from '@anthropic-ai/claude-agent-sdk'
-import { Tenbri } from 'tenbri'
+import { createSdkMcpServer, query, tool, type CanUseTool, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import { init } from 'tenbri'
 import { z } from 'zod'
-import { TenbriHooks } from '../src/index.js'
+import { instrumentClaudeAgentSdk } from '../src/index.js' // '@tenbri/claude-agent-sdk' outside this repository
+
+const log = await init({ stream: './audit/support', agent: 'agent:support', approver: `person:${userInfo().username}` })
+const actions = { issue_refund: { target: 'stripe:{charge}', policy: 'policy:refund@14' } }
 
 const billing = createSdkMcpServer({
   name: 'billing',
@@ -40,28 +37,17 @@ async function* prompt(): AsyncGenerator<SDKUserMessage> {
   yield { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: '' }
 }
 
-const log = await Tenbri.open('./audit/support', { create: true, digestKey: 'a 32-byte secret, kept apart....' })
-const hooks = new TenbriHooks(log, {
-  principal: 'agent:support',
-  approver: `person:${userInfo().username}`,
-  describe: (name, input) =>
-    name === 'mcp__billing__issue_refund'
-      ? {
-          action: 'issue_refund',
-          target: `stripe:${input.charge}`,
-          rule: { ref: 'policy:refund', version: '14', result: 'allow' },
-        }
-      : undefined,
-})
-const options = hooks.instrument({
-  mcpServers: { billing },
-  tools: [], // no built-in tools: only the refund, which asks first
-  canUseTool: ask,
-})
+const options = instrumentClaudeAgentSdk(
+  {
+    mcpServers: { billing },
+    tools: [], // no built-in tools: only the refund, which asks first
+    canUseTool: ask,
+  },
+  { actions },
+)
 for await (const message of query({ prompt: prompt(), options })) console.log(message.type)
 
 console.log('verified:', (await log.verify(log.fingerprint ?? undefined)).ok)
 for (const { entry: e } of await log.query({ action: 'issue_refund' })) {
   console.log(e.seq, e.phase, e.status ?? '', e.action, e.approval ?? '')
 }
-await log.close()

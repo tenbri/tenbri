@@ -15,6 +15,11 @@ export declare class Stream {
   get id(): string
   get fingerprint(): string | null
   get writable(): boolean
+  /**
+   * The keyed digest of `content` under `subject`'s data key (the tenant's without one) from
+   * this machine's key store.
+   */
+  digest(subject: string | undefined | null, content: Buffer): string
   append(draft: string): Promise<string>
   intent(draft: string): Promise<string>
   outcome(intent: string, status: string, draft: string): Promise<string>
@@ -32,6 +37,9 @@ export interface OpenOptions {
   key?: string
   create?: boolean
 }
+
+/** The action schemas of the `tenbri.toml` at `path`, as JSON. */
+export declare function schemas(path: string): string
 
 /** The package's version. */
 export declare function version(): string

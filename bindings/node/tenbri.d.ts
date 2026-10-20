@@ -96,7 +96,9 @@ export declare class Tenbri {
   readonly fingerprint: string | null
   /** Whether this machine holds the keys to write the stream. */
   readonly writable: boolean
-  digest(content: string | Uint8Array): string
+  /** The keyed digest of an input, `hmac-sha256:<hex>`: with the `digestKey` given at open, else
+   * `subject`'s data key (the tenant's without one) from the local key store. */
+  digest(content: string | Uint8Array, options?: { subject?: string }): string
   append(entry: Draft): Promise<Entry>
   /** Records an intent, durable before the action runs. */
   intent(draft: Draft): Promise<Entry>
@@ -109,7 +111,99 @@ export declare class Tenbri {
   query(filter?: QueryFilter): Promise<Match[]>
   flush(): Promise<void>
   close(): Promise<void>
+  /** `await using log = ...`: closed at the end of the scope. */
+  [Symbol.asyncDispose](): Promise<void>
 }
+
+export interface InitOptions {
+  /** The stream: a directory or `s3://bucket/prefix`. Default `$TENBRI_STREAM`. */
+  stream?: string | URL
+  /** The keys directory, apart from the stream. Default `$TENBRI_KEYS`, else `~/.config/tenbri/keys`. */
+  keys?: string
+  /** Who acts when nothing narrower says. Default `$TENBRI_AGENT`. */
+  agent?: Principal
+  /** Who answers the frameworks' approval prompts. Default `$TENBRI_APPROVER`. */
+  approver?: Principal
+  /** The action schemas. Default `$TENBRI_SCHEMA`, else `./tenbri.toml` when there is one. */
+  schema?: string
+  /** The genesis key to pin. */
+  key?: string
+  /** Keys input digests; default the local key store's data keys. */
+  digestKey?: string | Uint8Array
+  /** Let actions run, unrecorded and with a warning, when their intent cannot be written. */
+  failOpen?: boolean
+}
+
+/** What a schema or the code says about a tool, per tool name. */
+export interface ActionSpec {
+  /** The action type; default the tool's name. */
+  action?: string
+  /** A template of the tool's arguments (`'stripe:{charge}'`) or a function of them. */
+  target?: string | ((args: Record<string, any>) => string)
+  subject?: string | ((args: Record<string, any>) => string)
+  /** `'policy:refund@14'`: the rule that allowed it. */
+  policy?: string
+}
+export type Actions = Record<string, ActionSpec>
+
+/** The intent fields of a tool call. */
+export interface Described {
+  action?: string
+  target?: string
+  subject?: string
+  rule?: { ref: string; version: string; result: string }
+}
+
+/** The stream `init()` opened, with the settings the rest of the process uses. */
+export declare class Default extends Tenbri {
+  readonly agent?: Principal
+  readonly approver?: Principal
+  /** The action schemas of tenbri.toml, by action type. */
+  readonly actions: Record<string, { target?: string; policy?: string; [k: string]: unknown }>
+  readonly failOpen: boolean
+}
+
+/** Opens the process's default stream (made with its keys on first use), closed when the process
+ * is about to exit. Options default to their `TENBRI_*` variables. Awaiting it is optional: a
+ * decision waits for it, and throws what it threw. */
+export declare function init(options?: InitOptions): Promise<Default>
+/** The default stream, once `init()` has opened it. */
+export declare function defaultStream(): Promise<Default>
+/** Runs `fn` as `principal`: decisions in it, and in what it starts, are theirs. */
+export declare function agent<T>(principal: Principal, fn: () => T): T
+/** The principal of the innermost `agent()` scope, if any. */
+export declare function scopedAgent(): { kind: PrincipalKind; id: string } | undefined
+/** Who acts: `explicit`, else the innermost `agent()`, else `init({ agent })`. */
+export declare function who(explicit?: Principal): { kind: PrincipalKind; id: string }
+/** Who approved: `configured` (or what it returns for `args`), else `init({ approver })`. */
+export declare function approverOf<A extends unknown[]>(
+  configured: Principal | ((...args: A) => Principal | undefined) | undefined,
+  ...args: A
+): Principal | undefined
+/** The intent fields of a tool call, from `actions` over the action schemas of tenbri.toml. */
+export declare function describe(tool: string, args: Record<string, any>, actions?: Actions): Described
+
+export type PinSpec = { ref: string; version: string } & ({ content: string | Uint8Array } | { digest: string })
+
+export interface RecordOptions<A extends unknown[]> extends Omit<Draft, 'action' | 'inputs' | 'subject'> {
+  action: string
+  /** A template of the arguments (`'stripe:{charge}'` reads the first argument's `charge`, `'{1}'`
+   * the second argument) or a function of them. */
+  target?: string | ((...args: A) => string)
+  subject?: string | ((...args: A) => string)
+  /** `'policy:refund@14'`: the rule that allowed the action. */
+  policy?: string
+  inputs?: PinSpec[] | ((...args: A) => PinSpec[])
+  /** Default `init({ failOpen })`. */
+  failOpen?: boolean
+}
+
+/** `fn`, each call recorded as a decision on the default stream: the intent durable before it
+ * runs, then `ok`, `refused` (it threw `Refused`), `error` or `unknown` (an AbortError). */
+export declare function decision<A extends unknown[], R>(
+  options: RecordOptions<A>,
+  fn: (...args: A) => R | Promise<R>,
+): (...args: A) => Promise<R>
 
 export declare class Run {
   readonly principal: { kind: PrincipalKind; id: string }

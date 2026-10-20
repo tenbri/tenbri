@@ -3,6 +3,14 @@
 // Before a tool runs, its intent is durable in the stream; after, its outcome follows (`ok`,
 // `error`, `refused`, or `unknown` when interrupted). A tool approved through the SDK's
 // `canUseTool` is recorded as an `approval` entry, which the outcome names.
+//
+//   import { init } from 'tenbri'
+//   import { instrumentClaudeAgentSdk } from '@tenbri/claude-agent-sdk'
+//
+//   init({ agent: 'agent:support' })
+//   for await (const m of query({ prompt, options: instrumentClaudeAgentSdk({ ...options }) })) …
+//
+// `TenbriHooks` is the lower level: one session's hooks, on a stream you opened.
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import type {
@@ -14,7 +22,12 @@ import type {
   Options,
 } from '@anthropic-ai/claude-agent-sdk'
 import {
-  InvalidRequestError,
+  TenbriError,
+  approverOf,
+  defaultStream,
+  describe as describeAction,
+  who,
+  type Actions,
   type Draft,
   type Entry,
   type Input,
@@ -44,8 +57,8 @@ export interface Description {
 }
 
 export interface TenbriHooksOptions {
-  /** The agent: `'agent:support'`. */
-  principal: Principal
+  /** The agent: `'agent:support'`, or a function returning it when a tool is called. */
+  principal: Principal | (() => Principal)
   /** The tools to record: names, or a predicate of the name. All by default. */
   tools?: string[] | ((tool: string) => boolean)
   /** Maps a tool call to its intent's fields; the default records the target of file and web tools. */
@@ -107,13 +120,14 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /** Records the tool calls of a Claude Agent SDK session in a Tenbri stream. */
 export class TenbriHooks {
-  readonly #log: Tenbri
+  readonly #log: Tenbri | (() => Promise<Tenbri>)
   readonly #o: TenbriHooksOptions
   readonly #selected: (tool: string) => boolean
   readonly #open = new Map<string, Entry>()
   readonly #approvals = new Map<string, { by: Entry['principal']; entry: string }>()
 
-  constructor(log: Tenbri, options: TenbriHooksOptions) {
+  /** `log` is the stream, or a function returning it when a tool is called. */
+  constructor(log: Tenbri | (() => Promise<Tenbri>), options: TenbriHooksOptions) {
     this.#log = log
     this.#o = options
     const t = options.tools
@@ -156,7 +170,7 @@ export class TenbriHooks {
       if (by === undefined) return result
       try {
         const draft = traced({ kind: 'approval' as const, principal: by, action: intent.action })
-        const entry = await within(this.#log.append(draft), this.#o.timeout ?? 2000)
+        const entry = await within((await this.#stream()).append(draft), this.#o.timeout ?? 2000)
         this.#approvals.set(id, { by: entry.principal, entry: entryHash(entry) })
         return result
       } catch (e) {
@@ -170,18 +184,23 @@ export class TenbriHooks {
     }
   }
 
-  #draft(tool: string, input: ToolInput, id: string): Draft {
+  #stream(): Promise<Tenbri> {
+    return typeof this.#log === 'function' ? this.#log() : Promise.resolve(this.#log)
+  }
+
+  #draft(log: Tenbri, tool: string, input: ToolInput, id: string): Draft {
     const { action, target, inputs = [], ...fields } = (this.#o.describe ?? defaultDescribe)(tool, input) ?? {}
     const pinned = [...inputs]
     try {
-      pinned.push({ ref: 'claude:tool_input', version: id, digest: this.#log.digest(canonical(input)) })
+      pinned.push({ ref: 'claude:tool_input', version: id, digest: log.digest(canonical(input), { subject: fields.subject }) })
     } catch (e) {
-      if (!(e instanceof InvalidRequestError)) throw e // no digestKey at open: nothing to pin with
+      if (!(e instanceof TenbriError)) throw e // no key to digest with here: the intent says why
     }
+    const p = this.#o.principal
     return traced({
       ...fields,
       action: { type: action ?? tool, ...(target !== undefined && { target }) },
-      principal: this.#o.principal,
+      principal: typeof p === 'function' ? p() : p,
       ...(pinned.length > 0 && { inputs: pinned }),
     })
   }
@@ -190,8 +209,9 @@ export class TenbriHooks {
     if (i.hook_event_name !== 'PreToolUse' || !this.#selected(i.tool_name)) return {}
     const id = i.tool_use_id ?? toolUseID
     try {
-      const draft = this.#draft(i.tool_name, (i.tool_input ?? {}) as ToolInput, id)
-      this.#open.set(id, await within(this.#log.intent(draft), this.#o.timeout ?? 2000))
+      const log = await within(this.#stream(), this.#o.timeout ?? 2000)
+      const draft = this.#draft(log, i.tool_name, (i.tool_input ?? {}) as ToolInput, id)
+      this.#open.set(id, await within(log.intent(draft), this.#o.timeout ?? 2000))
       return {}
     } catch (e) {
       if (this.#o.failOpen) {
@@ -221,10 +241,62 @@ export class TenbriHooks {
     const approval = this.#approvals.get(id)
     this.#approvals.delete(id)
     try {
-      await this.#log.outcome(intent, status, traced(approval ? { approval } : {}))
+      await (await this.#stream()).outcome(intent, status, traced(approval ? { approval } : {}))
     } catch (e) {
       // The action already ran; the open intent is reconciled as unknown later.
       console.error(`tenbri: the ${status} outcome of ${id} was not recorded: ${message(e)}`)
     }
   }
+}
+
+export interface InstrumentOptions {
+  /** Per tool name, over the action schemas of tenbri.toml: `{ mcp__billing__issue_refund: {
+   * action: 'issue_refund', target: 'stripe:{charge}', policy: 'policy:refund@14' } }`. */
+  actions?: Actions
+  /** Who acts; default the `agent()` scope this is called in, else `init({ agent })`. */
+  agent?: Principal
+  /** Who allows a tool through `canUseTool`; default `init({ approver })` or TENBRI_APPROVER. */
+  approver?: TenbriHooksOptions['approver']
+  tools?: TenbriHooksOptions['tools']
+  /** Default `init({ failOpen })`. */
+  failOpen?: boolean
+  timeout?: number
+}
+
+/**
+ * `options` recorded on the stream `init()` opened: every tool call a decision, every approval
+ * through `canUseTool` an approval entry. Each tool is the action of its name, or of the action
+ * schema in tenbri.toml it ends with (`mcp__billing__issue_refund` is `issue_refund`): the
+ * schema's `target` (`stripe:{charge}`) is filled from the tool's input and its `policy` is the
+ * rule. `actions` overrides that per tool name. File and web tools record their path or URL.
+ *
+ *   query({ prompt, options: instrumentClaudeAgentSdk({ mcpServers, canUseTool }) })
+ */
+export function instrumentClaudeAgentSdk(options: Options = {}, o: InstrumentOptions = {}): Options {
+  const agent = o.agent ?? (() => {
+    try {
+      return who()
+    } catch {
+      return undefined // the default is still opening: resolved when a tool is called
+    }
+  })()
+  let failOpen = o.failOpen ?? false
+  const hooks = new TenbriHooks(
+    async () => {
+      const d = await defaultStream()
+      failOpen = o.failOpen ?? d.failOpen
+      return d
+    },
+    {
+      principal: () => who(agent),
+      tools: o.tools,
+      describe: (tool, input) => ({ ...defaultDescribe(tool, input), ...describeAction(tool, input, o.actions) }),
+      approver: (tool, input, opts) => approverOf(o.approver, tool, input, opts),
+      get failOpen() {
+        return failOpen
+      },
+      timeout: o.timeout,
+    },
+  )
+  return hooks.instrument(options)
 }

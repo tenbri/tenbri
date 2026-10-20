@@ -3,6 +3,8 @@
 'use strict'
 
 const { createHmac } = require('node:crypto')
+const { AsyncLocalStorage } = require('node:async_hooks')
+const { existsSync } = require('node:fs')
 const native = require('./index.js')
 
 /** Every TENBRI_* code the SDK raises, and its error class. */
@@ -135,10 +137,18 @@ class Tenbri {
     return this.#s.writable
   }
 
-  /** The keyed digest of an input, `hmac-sha256:<hex>`, with the `digestKey` given at open. */
-  digest(content) {
+  /**
+   * The keyed digest of an input, `hmac-sha256:<hex>`: with the `digestKey` given at open, else
+   * `subject`'s data key (the tenant's without one) from the local key store beside the stream's
+   * keys, made on first use.
+   */
+  digest(content, { subject } = {}) {
     if (this.#digestKey === undefined) {
-      throw new InvalidRequestError('a digest needs digestKey at open, or pass digest to read()')
+      try {
+        return this.#s.digest(subject ?? null, Buffer.from(content))
+      } catch (e) {
+        typed(e)
+      }
     }
     return 'hmac-sha256:' + createHmac('sha256', this.#digestKey).update(content).digest('hex')
   }
@@ -215,6 +225,233 @@ class Tenbri {
   close() {
     return call(this.#s.close())
   }
+
+  /** `await using log = await Tenbri.open(...)`: closed at the end of the scope. */
+  [Symbol.asyncDispose ?? Symbol.for('Symbol.asyncDispose')]() {
+    return this.close()
+  }
+}
+
+// The default stream, and the tracing-SDK-style API over it: init(), agent(), decision() and the
+// framework instrumentation in the adapter packages.
+
+/** The stream `init()` opened, with what the rest of the process uses with it. */
+class Default extends Tenbri {
+  constructor(s, digestKey, settings) {
+    super(s, digestKey)
+    Object.assign(this, settings)
+  }
+
+  /** Flushes and closes the stream; it stops being the default. */
+  async close() {
+    if (current === this) current = opening = undefined
+    return super.close()
+  }
+}
+
+let current // the Default, once open
+let opening // the promise of the Default init() is opening
+let exitHook = false
+const agentScope = new AsyncLocalStorage()
+const env = (v, name) => v ?? (process.env[name] || undefined)
+
+/**
+ * Opens the process's default stream, creating it and its keys if there is none, and closes it
+ * (flushing) when the process is about to exit. Each option defaults to its `TENBRI_*` variable:
+ * TENBRI_STREAM (a directory or s3://bucket/prefix), TENBRI_KEYS, TENBRI_AGENT, TENBRI_APPROVER,
+ * TENBRI_SCHEMA (default ./tenbri.toml when there is one).
+ */
+function init({ stream, keys, agent: a, approver, schema, key, digestKey, failOpen = false } = {}) {
+  const p = (async () => {
+    const location = env(stream, 'TENBRI_STREAM')
+    if (location === undefined) {
+      throw new InvalidRequestError('no stream: pass init({ stream }) or set TENBRI_STREAM to a directory or s3://bucket/prefix')
+    }
+    let path = env(schema, 'TENBRI_SCHEMA')
+    if (path === undefined && existsSync('tenbri.toml')) path = 'tenbri.toml'
+    let actions = {}
+    if (path !== undefined) {
+      try {
+        actions = JSON.parse(native.schemas(String(path))).actions
+      } catch (e) {
+        typed(e)
+      }
+    }
+    if (current) await current.close() // first: it may hold the same stream's writer
+    const s = await call(native.Stream.open(String(location), { keys: env(keys, 'TENBRI_KEYS'), key, create: true }))
+    const d = new Default(s, digestKey, {
+      agent: env(a, 'TENBRI_AGENT'),
+      approver: env(approver, 'TENBRI_APPROVER'),
+      actions,
+      failOpen,
+    })
+    current = d
+    return d
+  })()
+  p.catch(() => {}) // not awaited: the next decision throws it
+  opening = p
+  if (!exitHook) {
+    exitHook = true
+    process.on('beforeExit', () => {
+      if (current) current.close()
+    })
+  }
+  return p
+}
+
+/** The default stream, once `init()` has opened it. */
+async function defaultStream() {
+  if (current) return current
+  if (!opening) throw new InvalidRequestError('Tenbri is not initialized: call init() first')
+  return opening
+}
+
+/** Runs `fn` as `principal`: decisions in it, and in what it starts, are theirs. */
+function agent(p, fn) {
+  return agentScope.run(principal(p), fn)
+}
+
+/** The principal of the innermost `agent()` scope, if any. */
+function scopedAgent() {
+  return agentScope.getStore()
+}
+
+/** Who acts: `explicit`, else the innermost `agent()`, else `init({ agent })` or TENBRI_AGENT. */
+function who(explicit) {
+  const p = explicit ?? agentScope.getStore() ?? current?.agent
+  if (p === undefined) {
+    throw new InvalidRequestError("no principal: pass agent to init(), set TENBRI_AGENT, or run in agent('agent:...', fn)")
+  }
+  return principal(p)
+}
+
+/** Who approved: `configured` (a principal, or a function of the framework's call), else
+ * `init({ approver })` or TENBRI_APPROVER. */
+function approverOf(configured, ...args) {
+  if (typeof configured === 'function') return configured(...args)
+  return configured ?? current?.approver ?? (process.env.TENBRI_APPROVER || undefined)
+}
+
+/** `template` with each `{name}` (or `{name.key}`) replaced by that value of `scope`. */
+function fill(template, scope) {
+  return template.replace(/\{([^{}]+)\}/g, (_, path) => {
+    let v = scope
+    for (const k of path.split('.')) {
+      if (v === null || v === undefined || !(k in Object(v))) {
+        throw new InvalidRequestError(`${JSON.stringify(template)}: no argument ${path}`)
+      }
+      v = v[k]
+    }
+    return String(v)
+  })
+}
+
+/** `'policy:refund@14'` as the rule that allowed the action. */
+function rule(policy) {
+  const at = policy.lastIndexOf('@')
+  if (at <= 0 || at === policy.length - 1) throw new InvalidRequestError(`policy ${policy}: expected ref@version`)
+  return { ref: policy.slice(0, at), version: policy.slice(at + 1), result: 'allow' }
+}
+
+/**
+ * The intent fields of a tool call (`action`, `target`, `rule`, `subject`): from `actions` over the
+ * default stream's action schemas (tenbri.toml), each matched by the tool's name or its last `__`
+ * part, which is then the action type. A schema fills its `target` (`stripe:{charge}`) from the
+ * arguments and gives its `policy` as the rule.
+ */
+function describe(tool, args, actions) {
+  const match = (specs) => {
+    const name = [tool, tool.split('__').at(-1)].find((n) => Object.hasOwn(specs ?? {}, n))
+    return name === undefined ? undefined : [name, specs[name]]
+  }
+  const spec = {}
+  const schema = match(current?.actions)
+  if (schema) {
+    const [name, s] = schema
+    spec.action = name
+    if (s.target?.includes('{') && !s.target.includes('*')) spec.target = s.target
+    if (s.policy) spec.policy = s.policy
+  }
+  const code = match(actions)
+  if (code) Object.assign(spec, { action: code[0] }, code[1])
+  const out = {}
+  if (spec.action !== undefined && spec.action !== tool) out.action = spec.action
+  for (const k of ['target', 'subject']) {
+    const v = spec[k]
+    if (v !== undefined) out[k] = typeof v === 'function' ? v(args) : fill(v, args)
+  }
+  if (spec.policy) out.rule = rule(spec.policy)
+  return out
+}
+
+function pins(log, specs, subject) {
+  return specs.map((i) =>
+    i.digest !== undefined ? { ref: i.ref, version: i.version, digest: i.digest } : { ref: i.ref, version: i.version, digest: log.digest(i.content, { subject }) },
+  )
+}
+
+function statusOf(e) {
+  if (e instanceof Refused) return 'refused'
+  // Aborted: whether the action happened is not known.
+  return e?.name === 'AbortError' ? 'unknown' : 'error'
+}
+
+async function settle(log, intent, status) {
+  try {
+    await log.outcome(intent, status)
+  } catch (e) {
+    // The action ran: failing the call now would only invite a retry. The open intent is
+    // reconciled as unknown by the stream's next writer.
+    console.warn(`tenbri: the ${status} outcome of ${intent.id} was not recorded: ${e.message}`)
+  }
+}
+
+/**
+ * `fn`, recording each call as a decision on the default stream: the intent is durable before
+ * `fn` runs, then the outcome: `ok`, `refused` (when it throws `Refused`), `error` (anything else
+ * it throws, rethrown), `unknown` (an AbortError). `target` and `subject` are templates of the
+ * arguments (`'stripe:{charge}'` reads the first argument's `charge`, `'{1}'` the second
+ * argument) or functions of them; `policy` (`'policy:refund@14'`) is the rule; `inputs` pins what
+ * it relied on (`{ ref, version, content }`, or a function of the arguments returning those). If
+ * the intent cannot be written `fn` does not run, unless `failOpen` (default `init`'s).
+ */
+function decision(options, fn) {
+  const { action, target, policy, inputs, subject, principal: p, failOpen, ...fields } = options
+  const draftOf = (log, args) => {
+    const scope = Object.assign({}, args, args[0] && typeof args[0] === 'object' ? args[0] : {})
+    const value = (v) => (typeof v === 'function' ? v(...args) : v === undefined ? undefined : fill(v, scope))
+    const d = { ...fields, action: { type: action }, principal: who(p) }
+    const t = value(target)
+    if (t !== undefined) d.action.target = t
+    const s = value(subject)
+    if (s !== undefined) d.subject = s
+    if (policy !== undefined) d.rule = rule(policy)
+    const pinned = pins(log, (typeof inputs === 'function' ? inputs(...args) : inputs) ?? [], s)
+    if (pinned.length) d.inputs = pinned
+    return d
+  }
+  const recorded = async function (...args) {
+    let log, intent
+    try {
+      log = await defaultStream()
+      intent = await log.intent(draftOf(log, args))
+    } catch (e) {
+      if (!(e instanceof TenbriError) || !(failOpen ?? current?.failOpen ?? false)) throw e
+      console.warn(`tenbri: ${fn.name || action} runs unrecorded (fail-open): ${e.message}`)
+      return fn.apply(this, args)
+    }
+    let result
+    try {
+      result = await fn.apply(this, args)
+    } catch (e) {
+      await settle(log, intent, statusOf(e))
+      throw e
+    }
+    await settle(log, intent, 'ok')
+    return result
+  }
+  Object.defineProperty(recorded, 'name', { value: fn.name })
+  return recorded
 }
 
 /** A new entry id (ULID), for idempotent retries. */
@@ -224,6 +461,7 @@ const version = native.version()
 // Shorthand only: Node finds the names to import from ESM in this literal.
 module.exports = {
   DeadlineExceededError,
+  Default,
   IdempotencyConflictError,
   InvalidEntryError,
   InvalidRequestError,
@@ -236,6 +474,14 @@ module.exports = {
   Tenbri,
   TenbriError,
   WriteConflictError,
+  agent,
+  approverOf,
+  decision,
+  defaultStream,
+  describe,
+  init,
   newId,
+  scopedAgent,
   version,
+  who,
 }

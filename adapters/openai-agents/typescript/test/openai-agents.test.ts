@@ -3,7 +3,7 @@
 // errors, approvals, handoffs and failing closed or open.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -14,13 +14,14 @@ import {
   Usage,
   defineToolInputGuardrail,
   setTraceProcessors,
+  run,
   tool,
   type AgentOutputItem,
   type Model,
   type ModelResponse,
 } from '@openai/agents-core'
-import { Tenbri, TenbriError, type Entry } from 'tenbri'
-import { TenbriRecorder } from '../src/index.ts'
+import { Tenbri, TenbriError, init, type Entry } from 'tenbri'
+import { TenbriRecorder, instrumentOpenAIAgents, uninstrumentOpenAIAgents } from '../src/index.ts'
 
 // Traces are kept (their ids land in entries) but exported nowhere.
 setTraceProcessors([])
@@ -253,4 +254,53 @@ test('tool selection, failing closed and failing open', async () => {
   }
   assert.ok(ran.includes('a@example.com'))
   assert.ok(warnings.some((w) => w.includes('failOpen')))
+})
+
+test('the one-liner: init() and instrumentOpenAIAgents(), mapping from tenbri.toml, approver from the environment', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tenbri-openai-agents-'))
+  writeFileSync(join(dir, 'tenbri.toml'), '[actions.issue_refund]\ntarget = "stripe:{charge}"\npolicy = "policy:refund@14"\n')
+  process.env.TENBRI_APPROVER = 'person:alice'
+  const log = await init({ stream: join(dir, 'audit'), keys: join(dir, 'keys'), schema: join(dir, 'tenbri.toml') })
+  instrumentOpenAIAgents()
+  const ran: string[] = []
+  const refund = fn('issue_refund', ['charge'], ({ charge }) => ran.push(charge), {
+    needsApproval: async (_ctx: unknown, { charge }: { charge: string }) => charge !== 'ch_1',
+  })
+  const agent = new Agent({
+    name: 'support',
+    tools: [refund],
+    model: scripted(
+      [call('issue_refund', 'c1', { charge: 'ch_1' })],
+      [call('issue_refund', 'c2', { charge: 'ch_2' }), call('issue_refund', 'c3', { charge: 'ch_3' })],
+      [say('done')],
+    ),
+  })
+  try {
+    const first = await run(agent, 'refund ch_1, then ch_2 and ch_3')
+    for (const item of first.interruptions) {
+      if ((item.rawItem as { callId: string }).callId === 'c2') first.state.approve(item)
+      else first.state.reject(item)
+    }
+    await run(agent, first.state)
+  } finally {
+    uninstrumentOpenAIAgents()
+    delete process.env.TENBRI_APPROVER
+  }
+  assert.deepEqual(ran, ['ch_1', 'ch_2'])
+  const entries = await decisions(log)
+  assert.deepEqual(entries.map(brief), [
+    'intent issue_refund agent:support',
+    'outcome issue_refund ok agent:support',
+    'approval issue_refund person:alice',
+    'intent issue_refund agent:support',
+    'outcome issue_refund refused person:alice',
+    'intent issue_refund agent:support',
+    'outcome issue_refund ok agent:support',
+  ])
+  assert.deepEqual(entries[0].action, { type: 'issue_refund', target: 'stripe:ch_1' })
+  assert.deepEqual(entries[0].rule, { ref: 'policy:refund', version: '14', result: 'allow' })
+  assert.equal(entries[3].action?.target, 'stripe:ch_3') // refused
+  assert.deepEqual((entries[5].approval as { by: unknown }).by, { kind: 'person', id: 'alice' })
+  assert.ok((await log.verify(log.fingerprint!)).ok)
+  await log.close()
 })

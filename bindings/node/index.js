@@ -780,4 +780,5 @@ module.exports.__napiBindingTarget = __napiStampBindingTarget(nativeBinding, __n
 module.exports = nativeBinding
 module.exports.Stream = nativeBinding.Stream
 module.exports.newId = nativeBinding.newId
+module.exports.schemas = nativeBinding.schemas
 module.exports.version = nativeBinding.version

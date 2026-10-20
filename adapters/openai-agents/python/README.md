@@ -9,6 +9,62 @@ pip install --pre tenbri-openai-agents
 ```
 
 ```python
+import tenbri
+
+tenbri.init()  # TENBRI_STREAM=./audit/support TENBRI_APPROVER=person:alice
+tenbri.instrument_openai_agents()
+```
+
+From then on every `Runner.run`, `run_sync` and `run_streamed` is recorded, by `agent:<the
+agent's name>`, and so is every `RunState.approve` and `reject`, with no `hooks=` to pass.
+`tenbri.init()` creates the stream and its keys on first use and flushes at exit; see the
+[tenbri package](../../../bindings/python) for its settings and `@tenbri.decision` for your own
+functions.
+
+## Which action, which target, which policy
+
+A tool call is the action of the tool's name. Declare the action in `tenbri.toml` (the action
+schemas tenbrid and `tenbri schema check` validate against) and the record takes its target and
+rule from there, filled from the tool's arguments:
+
+```toml
+[actions.issue_refund]
+target = "stripe:{charge}"      # each {argument} is filled from the call; validated as *
+policy = "policy:refund@14"     # the rule that allowed it: ref@version
+```
+
+`init()` reads `./tenbri.toml` (or `TENBRI_SCHEMA`). A tool matches an action by its name or its
+last `__` part, so the MCP tool `mcp__billing__issue_refund` is `issue_refund`. A plain dict in
+code says the same, and wins:
+
+```python
+tenbri.instrument_openai_agents(
+    actions={"issue_refund": {"target": "stripe:{charge}", "policy": "policy:refund@14"}}
+)
+```
+
+## Approvals
+
+Answer interruptions the SDK's way; both answers are recorded before the run resumes:
+
+```python
+result = await Runner.run(agent, "Refund 80 EUR on ch_2")
+state = result.to_state()
+for item in result.interruptions:
+    state.approve(item)  # an approval entry by TENBRI_APPROVER, which the tool's intent names
+result = await Runner.run(agent, state)
+```
+
+`state.reject(item)` records the call's intent and a `refused` outcome by the approver. The approver
+is `TENBRI_APPROVER`, `init(approver=...)`, or `instrument_openai_agents(approver=...)`: a principal,
+or a function of the `ToolApprovalItem`.
+
+## Advanced: `TenbriRecorder`
+
+The one-liner is built on `TenbriRecorder`, the run hooks of one run on a stream you opened. What it records,
+below, is what the one-liner records.
+
+```python
 from agents import Runner
 from tenbri import AsyncTenbri
 from tenbri_openai_agents import TenbriRecorder
@@ -42,7 +98,7 @@ TenbriRecorder(
 recorder.read("ticket:4821", "3", ticket_text)              # pinned to the next decision
 ```
 
-Contents are pinned by keyed digest (`digest_key` at `AsyncTenbri.open`). Entries carry the SDK's
+Contents are pinned by keyed digest, keyed by the stream's local key store. Entries carry the SDK's
 trace id, so a decision and its trace find each other.
 
 Use one recorder per run, or per conversation when a run resumes after approvals. Pass

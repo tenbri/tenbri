@@ -10,11 +10,15 @@ import { join } from 'node:path'
 import { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { AIMessage } from '@langchain/core/messages'
 import type { ChatResult } from '@langchain/core/outputs'
-import { MemorySaver } from '@langchain/langgraph'
+import { Command, MemorySaver } from '@langchain/langgraph'
 import { createAgent, humanInTheLoopMiddleware, tool } from 'langchain'
 import { z } from 'zod'
-import { Refused, Tenbri } from 'tenbri'
-import { TenbriCallbackHandler } from '@tenbri/langgraph'
+import { Refused, init } from 'tenbri'
+import { instrumentLangChain } from '@tenbri/langgraph'
+
+const dir = mkdtempSync(join(tmpdir(), 'tenbri-example-'))
+const log = await init({ stream: join(dir, 'support'), keys: join(dir, 'keys'), approver: 'person:alice' })
+instrumentLangChain({ actions: { issue_refund: { target: 'stripe:{charge}', policy: 'policy:refund@14' } } })
 
 const issueRefund = tool(
   async ({ charge, amount }: { charge: string; amount: number }) => {
@@ -42,12 +46,6 @@ function call(id: string, charge: string, amount: number) {
   return new AIMessage({ content: '', tool_calls: [{ id, name: 'issue_refund', args: { charge, amount }, type: 'tool_call' }] })
 }
 
-const dir = mkdtempSync(join(tmpdir(), 'tenbri-example-'))
-const log = await Tenbri.open(join(dir, 'support'), { keys: join(dir, 'keys'), create: true, digestKey: 'a 32-byte secret, kept apart....' })
-const tenbri = new TenbriCallbackHandler(log, {
-  target: (_tool, args) => `stripe:${args.charge}`,
-  inputs: () => [{ ref: 'policy:refund', version: '14', content: 'refunds over 50 EUR need a person' }],
-})
 const agent = createAgent({
   model: new Scripted({}),
   tools: [issueRefund],
@@ -60,15 +58,15 @@ const agent = createAgent({
   ],
   checkpointer: new MemorySaver(),
 })
-const config = { callbacks: [tenbri], configurable: { thread_id: 'ticket-42' } }
+const config = { configurable: { thread_id: 'ticket-42' } }
 
 await agent.invoke({ messages: [{ role: 'user', content: 'Refund 20 EUR of ch_1' }] }, config)
 await agent.invoke({ messages: [{ role: 'user', content: 'Refund 120 EUR of ch_2' }] }, config)
 const state: any = await agent.getState(config)
 console.log('waiting for a person:', JSON.stringify(state.tasks.flatMap((t: any) => t.interrupts).map((i: any) => i.value.actionRequests)))
-await agent.invoke(await tenbri.resume(agent, config, { decisions: [{ type: 'approve' }] }, { by: 'person:alice' }), config)
+// Recorded as an approval by person:alice.
+await agent.invoke(new Command({ resume: { decisions: [{ type: 'approve' }] } }), config)
 
-await log.flush()
 for (const { entry: e } of await log.query()) {
   if (e.kind !== 'decision' && e.kind !== 'approval') continue
   const who = `${e.principal!.kind}:${e.principal!.id}`
@@ -76,4 +74,3 @@ for (const { entry: e } of await log.query()) {
 }
 const report = await log.verify(log.fingerprint!)
 console.log('verified:', report.ok, `(${report.entries} entries)`)
-await log.close()

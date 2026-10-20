@@ -1,15 +1,43 @@
 // Tenbri for LangGraph and LangChain.js: every tool call recorded as a decision.
 //
+//   import { init } from 'tenbri'
+//   import { instrumentLangChain } from '@tenbri/langgraph'
+//
+//   init()
+//   instrumentLangChain()
+//   // every tool call of every graph and agent from here on is recorded, and every
+//   // invoke(new Command({ resume })) records the answers it carries
+//
+// `TenbriCallbackHandler` is the lower level: a handler on a stream you opened, passed in
+// `callbacks`, with `resume()` to record the answers.
+//
 // A LangChain callback handler with raiseError and awaitHandlers: before a tool runs, its intent is
 // durable in the stream, or the tool does not run; after it, the outcome follows (ok, error, or
 // refused when the tool throws tenbri's Refused). LangGraph interrupts a person answers are recorded
 // with `resume()`: an approved call's intent names the approval entry that granted it.
 import { createHash } from 'node:crypto'
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base'
+import { registerConfigureHook, setContextVariable } from '@langchain/core/context'
 import type { Serialized } from '@langchain/core/load/serializable'
-import { Command, isGraphBubbleUp } from '@langchain/langgraph'
+import { Command, isCommand, isGraphBubbleUp } from '@langchain/langgraph'
+import { Pregel } from '@langchain/langgraph/pregel'
 import { trace as otel } from '@opentelemetry/api'
-import { Refused, TenbriError, type Draft, type Entry, type Input, type Principal, type Status, type Tenbri } from 'tenbri'
+import {
+  Refused,
+  TenbriError,
+  approverOf,
+  defaultStream,
+  describe as describeAction,
+  scopedAgent,
+  type Actions,
+  type Described,
+  type Draft,
+  type Entry,
+  type Input,
+  type Principal,
+  type Status,
+  type Tenbri,
+} from 'tenbri'
 
 export type Args = Record<string, unknown>
 /** An input to pin: `{ref, version, digest}`, or `{ref, version, content}` digested with the
@@ -17,8 +45,9 @@ export type Args = Record<string, unknown>
 export type PinnedInput = Input | { ref: string; version: string; content: string | Uint8Array }
 
 export interface TenbriCallbackHandlerOptions {
-  /** Who acts; default the agent's name (`createAgent({ name })`), else `agent:langgraph`. */
-  principal?: Principal
+  /** Who acts, or a function of the run's metadata returning it; default the agent's name
+   * (`createAgent({ name })`), else `agent:langgraph`. */
+  principal?: Principal | ((metadata?: Record<string, unknown>) => Principal | undefined)
   /** Which tools to record, by name or as a predicate; default all. */
   tools?: string[] | ((tool: string) => boolean)
   /** The reference the call acts on. */
@@ -26,9 +55,14 @@ export interface TenbriCallbackHandlerOptions {
   /** Inputs to pin to the decision. With a `digestKey`, the call's arguments are pinned too, as a
    * keyed digest. Arguments and results are never stored. */
   inputs?: (tool: string, args: Args) => PinnedInput[]
+  /** Any of `action`, `target`, `rule` and `subject` at once, over `target`. */
+  describe?: (tool: string, args: Args) => Described
+  /** Who answers the interrupts `recordResume()` records: a principal, or a function of the tool
+   * and its arguments. */
+  approver?: Principal | ((tool: string, args: Args) => Principal | undefined)
   /** When the intent can't be written, run the tool anyway (with a warning) instead of failing
    * the call. Off by default: no record, no action. */
-  failOpen?: boolean
+  failOpen?: boolean | (() => boolean)
 }
 
 export interface ApproveOptions {
@@ -79,18 +113,37 @@ function currentTrace(): { trace_id: string; span_id: string } | undefined {
 
 export class TenbriCallbackHandler extends BaseCallbackHandler {
   name = 'TenbriCallbackHandler'
-  readonly log: Tenbri
+  readonly #log: Tenbri | (() => Promise<Tenbri>)
+  #current?: Tenbri
   readonly #o: TenbriCallbackHandlerOptions
   readonly #open = new Map<string, Entry>()
   /** Tool call id -> the approval entry that granted it, from resume(). */
   readonly #approved = new Map<string, Entry>()
 
-  constructor(log: Tenbri, options: TenbriCallbackHandlerOptions = {}) {
+  /** `log` is the stream, or a function returning it on each use. */
+  constructor(log: Tenbri | (() => Promise<Tenbri>), options: TenbriCallbackHandlerOptions = {}) {
     // raiseError: a failed intent stops the tool, and LangChain awaits the handler, so the intent
     // is durable before the tool runs.
     super({ raiseError: true })
-    this.log = log
+    this.#log = log
     this.#o = options
+  }
+
+  /** The stream, as of the last use. */
+  get log(): Tenbri {
+    if (typeof this.#log !== 'function') return this.#log
+    if (!this.#current) throw new TenbriError('the stream is still opening')
+    return this.#current
+  }
+
+  async #ready(): Promise<Tenbri> {
+    if (typeof this.#log !== 'function') return this.#log
+    return (this.#current = await this.#log())
+  }
+
+  #failOpen(): boolean {
+    const f = this.#o.failOpen
+    return typeof f === 'function' ? f() : !!f
   }
 
   #selected(tool: string): boolean {
@@ -99,30 +152,34 @@ export class TenbriCallbackHandler extends BaseCallbackHandler {
   }
 
   #who(metadata?: Record<string, unknown>): Principal {
-    if (this.#o.principal !== undefined) return this.#o.principal
+    const p = this.#o.principal
+    const given = typeof p === 'function' ? p(metadata) : p
+    if (given !== undefined) return given
     const name = metadata?.lc_agent_name
     return name ? `agent:${name}` : 'agent:langgraph'
   }
 
-  #pins(tool: string, args: Args, call?: string): Input[] {
+  #pins(tool: string, args: Args, call: string | undefined, subject: string | undefined): Input[] {
     const pins = (this.#o.inputs?.(tool, args) ?? []).map((i) =>
-      'content' in i ? { ref: i.ref, version: i.version, digest: this.log.digest(i.content) } : i,
+      'content' in i ? { ref: i.ref, version: i.version, digest: this.log.digest(i.content, { subject }) } : i,
     )
     if (call) {
       try {
-        pins.push({ ref: `langchain:tool_call/${call}`, version: 'args', digest: this.log.digest(canon(args)) })
+        pins.push({ ref: `langchain:tool_call/${call}`, version: 'args', digest: this.log.digest(canon(args), { subject }) })
       } catch (e) {
-        if (!(e instanceof TenbriError)) throw e // no digestKey
+        if (!(e instanceof TenbriError)) throw e // no key to digest with here: the intent says why
       }
     }
     return pins
   }
 
   #draft(tool: string, args: Args, principal: Principal, ext: Record<string, string | undefined>, call?: string): Draft {
-    const target = this.#o.target?.(tool, args)
+    const { action = tool, target = this.#o.target?.(tool, args), rule, subject } = this.#o.describe?.(tool, args) ?? {}
     const langchain = Object.fromEntries(Object.entries(ext).filter(([, v]) => v))
-    const d: Draft = { action: target === undefined ? { type: tool } : { type: tool, target }, principal, ext: { langchain } }
-    const pins = this.#pins(tool, args, call)
+    const d: Draft = { action: target === undefined ? { type: action } : { type: action, target }, principal, ext: { langchain } }
+    if (rule) d.rule = rule
+    if (subject) d.subject = subject
+    const pins = this.#pins(tool, args, call, subject)
     if (pins.length) d.inputs = pins
     const t = currentTrace()
     if (t) d.trace = t
@@ -141,6 +198,14 @@ export class TenbriCallbackHandler extends BaseCallbackHandler {
   ): Promise<void> {
     const name = runName ?? (tool as { name?: string }).name ?? tool.id.at(-1) ?? 'tool'
     if (!this.#selected(name)) return
+    let log: Tenbri
+    try {
+      log = await this.#ready()
+    } catch (e) {
+      if (!this.#failOpen() || !(e instanceof TenbriError)) throw e
+      console.warn(`tenbri: ${name} ran unrecorded (fail-open): ${e.message}`)
+      return
+    }
     let args: Args
     try {
       const parsed = JSON.parse(input)
@@ -156,9 +221,9 @@ export class TenbriCallbackHandler extends BaseCallbackHandler {
       draft.approval = { by: a.principal, entry: entryHash(a) }
     }
     try {
-      this.#open.set(runId, await this.log.intent(draft))
+      this.#open.set(runId, await log.intent(draft))
     } catch (e) {
-      if (!this.#o.failOpen || !(e instanceof TenbriError)) throw e
+      if (!this.#failOpen() || !(e instanceof TenbriError)) throw e
       console.warn(`tenbri: ${name} ran unrecorded (fail-open): ${e.message}`)
     }
   }
@@ -189,6 +254,7 @@ export class TenbriCallbackHandler extends BaseCallbackHandler {
    * `toolCallId`), its intent names the approval. For interrupts of your own; `resume()` calls
    * it for LangChain's `humanInTheLoopMiddleware`. */
   async approve(tool: string, args: Args, o: ApproveOptions): Promise<Entry> {
+    await this.#ready()
     const ext = { tool_call_id: o.toolCallId, thread_id: o.threadId, checkpoint_id: o.checkpointId }
     const entry = await this.log.append({ ...this.#draft(tool, args, o.by, ext, o.toolCallId), kind: 'approval' })
     if (o.toolCallId) this.#approved.set(o.toolCallId, entry)
@@ -204,6 +270,19 @@ export class TenbriCallbackHandler extends BaseCallbackHandler {
    * single decision, or an object of interrupt ids to those. Other interrupts are left to
    * `approve()`. */
   async resume(graph: Graph, config: any, resume: any, { by }: { by: Principal }): Promise<Command> {
+    await this.#answers(graph, config, resume, () => by)
+    return new Command({ resume })
+  }
+
+  /** `resume()`, with the `approver` given at construction, for a graph about to be invoked with
+   * `new Command({ resume })`. */
+  async recordResume(graph: Graph, config: any, resume: any): Promise<void> {
+    const a = this.#o.approver
+    await this.#answers(graph, config, resume, (tool, args) => (typeof a === 'function' ? a(tool, args) : a))
+  }
+
+  async #answers(graph: Graph, config: any, resume: any, by: (tool: string, args: Args) => Principal | undefined) {
+    await this.#ready()
     const snap = await graph.getState(config)
     const pending = new Map((snap.tasks ?? []).flatMap((t) => t.interrupts ?? []).map((i) => [i.id ?? '', i.value]))
     let answers: Map<string, any>
@@ -229,32 +308,35 @@ export class TenbriCallbackHandler extends BaseCallbackHandler {
       } else {
         continue
       }
-      for (const [call, tool, args, decision] of calls) await this.#record(decision, tool, args, by, agent, call, where)
+      for (const [call, tool, args, decision] of calls) await this.#record(decision, tool, args, by(tool, args), agent, call, where)
     }
-    return new Command({ resume })
   }
 
   async #record(
     decision: Decision,
     tool: string,
     args: Args,
-    by: Principal,
+    by: Principal | undefined,
     agent: Principal,
     call: string | undefined,
     where: { threadId?: string; checkpointId?: string },
   ): Promise<void> {
     if (decision.type === 'approve' || decision.type === 'edit') {
+      if (by === undefined) {
+        console.warn(`tenbri: ${call} approved by nobody known: set TENBRI_APPROVER`)
+        return
+      }
       const a = decision.type === 'edit' ? (decision.editedAction?.args ?? args) : args
       await this.approve(tool, a, { by, toolCallId: call, ...where })
       return
     }
-    const reviewer = typeof by === 'string' ? by : `${by.kind}:${by.id}`
+    const reviewer = by === undefined ? undefined : typeof by === 'string' ? by : `${by.kind}:${by.id}`
     const ext = { tool_call_id: call, thread_id: where.threadId, checkpoint_id: where.checkpointId, decision: decision.type, reviewer }
     if (decision.type === 'reject') {
       const intent = await this.log.intent(this.#draft(tool, args, agent, ext, call))
       await this.log.outcome(intent, 'refused')
     } else if (decision.type === 'respond') {
-      await this.log.append({ ...this.#draft(tool, args, by, ext, call), kind: 'note' })
+      await this.log.append({ ...this.#draft(tool, args, by ?? agent, ext, call), kind: 'note' })
     }
   }
 }
@@ -270,4 +352,58 @@ function callIds(values: any, requests: Array<{ name: string; args: Args }>): Ar
     const i = left.findIndex((c) => c.name === r.name && canon(c.args) === canon(r.args))
     return i < 0 ? undefined : left.splice(i, 1)[0].id
   })
+}
+
+export interface InstrumentOptions extends Pick<TenbriCallbackHandlerOptions, 'tools'> {
+  /** Per tool name, over the action schemas of tenbri.toml: `{ issue_refund: { target:
+   * 'stripe:{charge}', policy: 'policy:refund@14' } }`. */
+  actions?: Actions
+  /** Who acts; default the `agent()` scope, else the agent's name, else `init({ agent })`. */
+  agent?: Principal
+  /** Who answers the interrupts; default `init({ approver })` or TENBRI_APPROVER. */
+  approver?: TenbriCallbackHandlerOptions['approver']
+  /** Default `init({ failOpen })`. */
+  failOpen?: boolean
+}
+
+let registered = false
+let originalStream: Pregel<any, any>['stream'] | undefined
+
+/**
+ * Records every LangChain and LangGraph tool call from now on on the stream `init()` opened, with
+ * no `callbacks` to pass, and, when a graph is invoked or streamed with `new Command({ resume })`,
+ * the answers it carries to `humanInTheLoopMiddleware` interrupts. Each tool call is the action of
+ * its name, or of the action schema in tenbri.toml of that name: the schema's `target`
+ * (`stripe:{charge}`) is filled from the call's arguments and its `policy` is the rule. `actions`
+ * overrides that per tool name. Call it at startup: LangChain.js scopes it to the async context it
+ * is called in and what that context starts.
+ */
+export function instrumentLangChain(o: InstrumentOptions = {}): void {
+  uninstrumentLangChain()
+  let current: Awaited<ReturnType<typeof defaultStream>> | undefined
+  const handler = new TenbriCallbackHandler(async () => (current = await defaultStream()), {
+    tools: o.tools,
+    principal: (metadata) =>
+      o.agent ?? scopedAgent() ?? (metadata?.lc_agent_name ? `agent:${metadata.lc_agent_name}` : undefined) ?? current?.agent,
+    describe: (tool, args) => describeAction(tool, args, o.actions),
+    approver: (tool, args) => approverOf(o.approver, tool, args),
+    failOpen: () => o.failOpen ?? current?.failOpen ?? false,
+  })
+  if (!registered) {
+    registerConfigureHook({ contextVar: 'tenbri' })
+    registered = true
+  }
+  setContextVariable('tenbri', handler)
+  const stream = (originalStream = Pregel.prototype.stream)
+  Pregel.prototype.stream = async function (this: Pregel<any, any>, input: any, options?: any) {
+    if (isCommand(input) && input.resume !== undefined) await handler.recordResume(this as Graph, options, input.resume)
+    return stream.call(this, input, options)
+  } as Pregel<any, any>['stream']
+}
+
+/** Stops recording tool calls and answers from now on. */
+export function uninstrumentLangChain(): void {
+  if (registered) setContextVariable('tenbri', undefined)
+  if (originalStream) Pregel.prototype.stream = originalStream
+  originalStream = undefined
 }

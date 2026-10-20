@@ -1,5 +1,14 @@
 // Tenbri for the OpenAI Agents SDK: every tool call and handoff recorded as a decision.
 //
+//   import { init } from 'tenbri'
+//   import { instrumentOpenAIAgents } from '@tenbri/openai-agents'
+//
+//   init()
+//   instrumentOpenAIAgents()
+//   // every run() from here on is recorded, and every RunState approve() and reject()
+//
+// `TenbriRecorder` is the lower level, on a stream you opened:
+//
 //   const log = await Tenbri.open('./audit/support', { create: true })
 //   const recorder = new TenbriRecorder(log)
 //   recorder.instrument(agent)
@@ -15,6 +24,8 @@ import { createHash } from 'node:crypto'
 import {
   Agent,
   Handoff,
+  RunState as RunStateClass,
+  Runner,
   getCurrentSpan,
   getCurrentTrace,
   type FunctionTool,
@@ -24,7 +35,20 @@ import {
   type ToolInputGuardrailData,
   type ToolInputGuardrailDefinition,
 } from '@openai/agents-core'
-import { TenbriError, type Draft, type Entry, type Input, type Principal, type Status, type Tenbri } from 'tenbri'
+import {
+  TenbriError,
+  approverOf,
+  defaultStream,
+  describe as describeAction,
+  type Actions,
+  type Described,
+  type Draft,
+  type Entry,
+  type Input,
+  type Principal,
+  type Status,
+  type Tenbri,
+} from 'tenbri'
 
 /** An input to pin: its `content` is digested with the stream's `digestKey`, or `digest` is given. */
 export interface InputSpec {
@@ -45,6 +69,9 @@ export interface RecorderOptions {
   inputs?: (tool: string, args: Record<string, unknown>) => InputSpec[]
   /** The pseudonymous handle of the person the run is about (per-subject keys, erasure). */
   subject?: string
+  /** Any of `action`, `target`, `rule` and `subject` from the tool's name and parsed arguments, at
+   * once, over the options above. */
+  describe?: (tool: string, args: Record<string, unknown>) => Described
   /** Let actions run when the stream cannot be written (warned, not recorded). Default: block. */
   failOpen?: boolean
   /** Whether a tool's output means it failed. Default: the SDK's own error and timeout messages. */
@@ -150,6 +177,24 @@ export class TenbriRecorder {
     state.reject(item, options)
   }
 
+  /** Records a person's answer to `item` in the background, before the next intent: an approval
+   * by `by`, which the tool's intent names, or a refused decision. Does not answer `state`. */
+  answer(item: RunToolApprovalItem, approved: boolean, by: Principal | undefined): void {
+    const call = this.#call(item)
+    if (!call) return
+    if (!approved) {
+      this.#later(() => this.#decide(this.#draft(call), 'refused', by === undefined ? undefined : { principal: by }))
+    } else if (by === undefined) {
+      console.warn(`tenbri: ${call.callId} approved by nobody known: set TENBRI_APPROVER`)
+    } else {
+      const draft = { kind: 'approval' as const, principal: by, action: this.#action(call), subject: this.#o.subject }
+      this.#later(async () => {
+        const entry = await this.log.append(draft)
+        this.#approvals.set(call.callId, { by: entry.principal, entry: entryHash(entry) })
+      })
+    }
+  }
+
   /** Waits for the entries written in the background; throws the first that failed. */
   async flush(): Promise<void> {
     await this.#pending
@@ -214,9 +259,14 @@ export class TenbriRecorder {
     return { agent: item.agent, name: raw.name, arguments: raw.arguments, callId: raw.callId }
   }
 
+  #described(call: Call): Described {
+    return this.#o.describe?.(call.name, parse(call.arguments)) ?? {}
+  }
+
   #action(call: Call) {
-    const target = this.#o.target?.(call.name, parse(call.arguments))
-    return { type: this.#o.action?.(call.name) ?? call.name, ...(target ? { target } : {}) }
+    const d = this.#described(call)
+    const target = d.target ?? this.#o.target?.(call.name, parse(call.arguments))
+    return { type: d.action ?? this.#o.action?.(call.name) ?? call.name, ...(target ? { target } : {}) }
   }
 
   #draft(call: Call): Draft {
@@ -225,13 +275,15 @@ export class TenbriRecorder {
     this.#reads = []
     const approval = this.#approvals.get(call.callId)
     this.#approvals.delete(call.callId)
+    const { rule, subject } = this.#described(call)
     return {
       ...this.#trace(),
       principal: who(call.agent),
       action: this.#action(call),
       ...(inputs.length ? { inputs } : {}),
       ...(approval ? { approval } : {}),
-      subject: this.#o.subject,
+      ...(rule ? { rule } : {}),
+      subject: subject ?? this.#o.subject,
     }
   }
 
@@ -311,4 +363,56 @@ function canonical(v: unknown): string {
 // entryHash from the binding would remove this.
 export function entryHash(entry: Entry): string {
   return `sha256:${createHash('sha256').update(Buffer.from([0])).update(canonical(entry)).digest('hex')}`
+}
+
+export interface InstrumentOptions extends Pick<RecorderOptions, 'tools' | 'subject' | 'failOpen'> {
+  /** Per tool name, over the action schemas of tenbri.toml: `{ issue_refund: { target:
+   * 'stripe:{charge}', policy: 'policy:refund@14' } }`. */
+  actions?: Actions
+  /** Who answers an interruption: a principal, or a function of the item. Default
+   * `init({ approver })` or TENBRI_APPROVER. */
+  approver?: Principal | ((item: RunToolApprovalItem) => Principal | undefined)
+}
+
+const originals: { run?: Runner['run']; approve?: RunState<any, any>['approve']; reject?: RunState<any, any>['reject'] } = {}
+
+/**
+ * Records every run from now on (`run()` and `Runner.run`, streamed or not) on the stream `init()`
+ * opened, and every `RunState` approve() and reject(). Each tool call is by `agent:<the agent's
+ * name>`, the action of the tool's name or of the action schema in tenbri.toml of that name: the
+ * schema's `target` (`stripe:{charge}`) is filled from the call's arguments and its `policy` is
+ * the rule. `actions` overrides that per tool name.
+ */
+export function instrumentOpenAIAgents(o: InstrumentOptions = {}): void {
+  uninstrumentOpenAIAgents()
+  const run = (originals.run = Runner.prototype.run)
+  const approve = (originals.approve = RunStateClass.prototype.approve)
+  const reject = (originals.reject = RunStateClass.prototype.reject)
+  Runner.prototype.run = async function (this: Runner, agent: Agent<any, any>, ...rest: any[]) {
+    const log = await defaultStream()
+    if (!owners.has(agent)) {
+      const describe = (tool: string, args: Record<string, unknown>) => describeAction(tool, args, o.actions)
+      new TenbriRecorder(log, { ...o, describe, failOpen: o.failOpen ?? log.failOpen }).instrument(agent)
+    }
+    const result = await (run as any).call(this, agent, ...rest)
+    // A streamed run is still going: its entries are written as it goes, and before the next.
+    if (!rest[1]?.stream) await owners.get(agent)!.flush()
+    return result
+  } as Runner['run']
+  RunStateClass.prototype.approve = function (this: RunState<any, any>, item, ...rest) {
+    owners.get(item.agent)?.answer(item, true, approverOf(o.approver, item))
+    return approve.call(this, item, ...rest)
+  }
+  RunStateClass.prototype.reject = function (this: RunState<any, any>, item, ...rest) {
+    owners.get(item.agent)?.answer(item, false, approverOf(o.approver, item))
+    return reject.call(this, item, ...rest)
+  }
+}
+
+/** Stops recording runs started from now on (agents already recorded stay recorded). */
+export function uninstrumentOpenAIAgents(): void {
+  if (originals.run) Runner.prototype.run = originals.run
+  if (originals.approve) RunStateClass.prototype.approve = originals.approve
+  if (originals.reject) RunStateClass.prototype.reject = originals.reject
+  delete originals.run
 }

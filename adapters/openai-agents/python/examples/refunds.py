@@ -20,9 +20,8 @@ from agents.items import ModelResponse
 from agents.models.interface import Model
 from agents.usage import Usage
 from openai.types.responses import ResponseFunctionToolCall, ResponseOutputMessage, ResponseOutputText
-from tenbri import AsyncTenbri
 
-from tenbri_openai_agents import TenbriRecorder
+import tenbri
 
 POLICY = "Refunds up to 50 EUR are automatic; above that a person approves."
 
@@ -61,8 +60,10 @@ class Scripted(Model):
 
 
 async def main(path: str) -> None:
-    # A real deployment keeps the digest key in its secret store.
-    log = await AsyncTenbri.open(path, create=True, digest_key=b"example digest key")
+    log = tenbri.init(path, approver="person:alice")  # a person answers the approvals
+    tenbri.instrument_openai_agents(
+        actions={"issue_refund": {"target": "stripe:{charge}", "policy": "policy:refund@14"}}
+    )
     if not os.environ.get("OPENAI_API_KEY"):
         set_trace_processors([])  # nowhere to export traces to; entries still carry their ids
     agent = Agent(
@@ -71,28 +72,21 @@ async def main(path: str) -> None:
         tools=[issue_refund],
         model=None if os.environ.get("OPENAI_API_KEY") else Scripted(),
     )
-    recorder = TenbriRecorder(log, target=lambda tool, args: f"stripe:{args.get('charge')}")
-    recorder.read("policy:refund", "14", POLICY)
 
-    async with recorder:
-        run_config = recorder.run_config()
-        result = await Runner.run(
-            agent, "Refund 20 EUR on ch_1 and 80 EUR on ch_2.", hooks=recorder, run_config=run_config
-        )
-        while result.interruptions:
-            state = result.to_state()
-            for item in result.interruptions:
-                await recorder.approve(state, item, "person:alice")  # a person said yes
-            result = await Runner.run(agent, state, hooks=recorder, run_config=run_config)
+    result = await Runner.run(agent, "Refund 20 EUR on ch_1 and 80 EUR on ch_2.")
+    while result.interruptions:
+        state = result.to_state()
+        for item in result.interruptions:
+            state.approve(item)  # recorded as an approval by person:alice
+        result = await Runner.run(agent, state)
 
-    for m in await log.query():
+    for m in log.query():
         e = m.entry
         who = e.get("principal", {})
         print(e["seq"], e["kind"], e.get("phase", ""), e.get("status", ""),
               f"{who.get('kind', '')}:{who.get('id', '')}", e.get("action", {}))
-    report = await log.verify(log.fingerprint)
+    report = log.verify(log.fingerprint)
     print("verified" if report.ok else f"broken: {report.broken}", "- key", log.fingerprint)
-    await log.close()
 
 
 if __name__ == "__main__":

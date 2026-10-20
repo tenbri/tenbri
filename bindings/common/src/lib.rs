@@ -117,6 +117,13 @@ pub fn new_id() -> Result<String, Error> {
     Ok(tenbri_writer::new_id(now_ms())?)
 }
 
+/// The action schemas of the `tenbri.toml` at `path`, as JSON (`{"unknown_actions", "actions"}`),
+/// checked as `tenbri schema check` checks them.
+pub fn schemas(path: &Path) -> Result<String, Error> {
+    let s = tenbri_schema::Schemas::load(path).map_err(|e| Error::new(INVALID_REQUEST, e))?;
+    Ok(serde_json::to_string(&s).expect("schemas serialize"))
+}
+
 /// How to open a stream.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
@@ -137,6 +144,8 @@ pub struct Stream {
     pin: Option<String>,
     fingerprint: Option<String>,
     replicated: bool,
+    /// This machine's keys of the stream, which hold its data keys; none when read-only.
+    keys: Option<KeyStore>,
     /// The writer, or why there is none: read-only, or closed.
     lane: Mutex<Result<Lane, Error>>,
 }
@@ -184,6 +193,7 @@ impl Stream {
             None => None,
         };
         let fingerprint = pin.clone().or(genesis);
+        let held = ks.clone();
         let lane = match (ks, &fingerprint) {
             (Some(ks), Some(fp)) => writer(store.clone(), ks, fp).await,
             _ => Err(Error::new(
@@ -207,6 +217,7 @@ impl Stream {
             id: head.stream,
             pin,
             fingerprint,
+            keys: held,
             lane: Mutex::new(lane),
         })
     }
@@ -225,6 +236,29 @@ impl Stream {
     /// Whether this stream can be written here.
     pub fn writable(&self) -> bool {
         self.lane.lock().expect("lane lock").is_ok()
+    }
+
+    /// The keyed digest of an input, `hmac-sha256:<hex>`, under the data key of `subject` (the
+    /// tenant's without one) from the local key store beside the stream's keys, made on first use:
+    /// erasing the subject's key leaves the digest unconfirmable (spec/privacy.md).
+    pub fn digest(&self, subject: Option<&str>, content: &[u8]) -> Result<String, Error> {
+        let ks = self.keys.as_ref().ok_or_else(|| {
+            Error::new(
+                NO_SESSION_KEY,
+                format!(
+                    "no keys for {} on this machine, so no data key to digest with",
+                    self.id
+                ),
+            )
+        })?;
+        tenbri_crypt::DataKeys::open(ks)?
+            .digest(subject, content)
+            .map_err(|e| match e {
+                tenbri_crypt::Error::Io(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
+                    Error::new(INVALID_REQUEST, e.to_string())
+                }
+                e => Error::new(STORE_UNAVAILABLE, e.to_string()),
+            })
     }
 
     /// Appends a draft entry (JSON object); returns it as stored (canonical JSON), once durable.

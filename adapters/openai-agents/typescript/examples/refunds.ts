@@ -5,9 +5,12 @@
 //
 // With OPENAI_API_KEY set it asks the model; without, a scripted model plays the same turns, so the
 // example runs anywhere. Then `tenbri verify ./audit --key <fingerprint>` checks the record.
-import { Agent, Runner, Usage, setTraceProcessors, tool, type AgentOutputItem, type Model } from '@openai/agents-core'
-import { Tenbri } from 'tenbri'
-import { TenbriRecorder } from '../src/index.ts' // '@tenbri/openai-agents' outside this repository
+import { Agent, Usage, run, setTraceProcessors, tool, type AgentOutputItem, type Model } from '@openai/agents-core'
+import { init } from 'tenbri'
+import { instrumentOpenAIAgents } from '../src/index.ts' // '@tenbri/openai-agents' outside this repository
+
+const log = await init({ stream: process.argv[2] ?? './audit', approver: 'person:alice' }) // a person answers the approvals
+instrumentOpenAIAgents({ actions: { issue_refund: { target: 'stripe:{charge}', policy: 'policy:refund@14' } } })
 
 const POLICY = 'Refunds up to 50 EUR are automatic; above that a person approves.'
 
@@ -51,9 +54,6 @@ function scripted(): Model {
   }
 }
 
-const path = process.argv[2] ?? './audit'
-// A real deployment keeps the digest key in its secret store.
-const log = await Tenbri.open(path, { create: true, digestKey: 'example digest key' })
 if (process.env.OPENAI_API_KEY) await import('@openai/agents' as string) // the OpenAI model provider
 else setTraceProcessors([]) // nowhere to export traces to; entries still carry their ids
 const agent = new Agent({
@@ -62,21 +62,15 @@ const agent = new Agent({
   tools: [issueRefund],
   ...(process.env.OPENAI_API_KEY ? {} : { model: scripted() }),
 })
-const recorder = new TenbriRecorder(log, { target: (_tool, args) => `stripe:${args.charge}` })
-recorder.instrument(agent)
-recorder.read('policy:refund', { version: '14', content: POLICY })
 
-const runner = new Runner()
-let result = await runner.run(agent, 'Refund 20 EUR on ch_1 and 80 EUR on ch_2.')
+let result = await run(agent, 'Refund 20 EUR on ch_1 and 80 EUR on ch_2.')
 while (result.interruptions.length) {
-  for (const item of result.interruptions) await recorder.approve(result.state, item, 'person:alice') // a person said yes
-  result = await runner.run(agent, result.state)
+  for (const item of result.interruptions) result.state.approve(item) // recorded as an approval by person:alice
+  result = await run(agent, result.state)
 }
-await recorder.flush()
 
 for (const { entry: e } of await log.query()) {
   console.log(e.seq, e.kind, e.phase ?? '', e.status ?? '', `${e.principal?.kind}:${e.principal?.id}`, e.action)
 }
 const report = await log.verify(log.fingerprint!)
 console.log(report.ok ? 'verified' : `broken: ${JSON.stringify(report.broken)}`, '- key', log.fingerprint)
-await log.close()

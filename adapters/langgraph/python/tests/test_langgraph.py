@@ -279,3 +279,90 @@ def test_async_agent(log: Tenbri) -> None:
     run = agent.ainvoke({"messages": [("user", "x")]}, {"callbacks": [TenbriCallbackHandler(log)]})
     asyncio.run(run)
     assert outcomes(log) == {"lookup": "ok"}
+
+
+def test_instrument_one_liner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """tenbri.init() and tenbri.instrument_langchain(): no callbacks to pass, the target and policy
+    from tenbri.toml, and the answers in Command(resume=...) recorded with the approver from the
+    environment, in place of resume()."""
+    import tenbri
+    from langgraph.types import Command
+
+    from tenbri_langgraph import uninstrument
+
+    (tmp_path / "tenbri.toml").write_text(
+        '[actions.issue_refund]\ntarget = "stripe:{charge}"\npolicy = "policy:refund@14"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TENBRI_APPROVER", "person:alice")
+    log = tenbri.init(tmp_path / "s", keys=tmp_path / "keys")
+    tenbri.instrument_langchain()
+    calls = [
+        ("issue_refund", {"charge": "ch_1", "amount": 20}),
+        ("issue_refund", {"charge": "ch_2", "amount": 30}),
+    ]
+    hitl = HumanInTheLoopMiddleware(interrupt_on={"issue_refund": True})
+    agent = create_agent(
+        model(calls), [issue_refund], middleware=[hitl], checkpointer=InMemorySaver(), name="support"
+    )
+    config: Any = {"configurable": {"thread_id": "t1"}}
+    try:
+        agent.invoke({"messages": [("user", "refund both")]}, config)
+        assert decisions(log) == []  # paused before either call
+        answer = {"decisions": [{"type": "approve"}, {"type": "reject", "message": "no"}]}
+        agent.invoke(Command(resume=answer), config)
+        # Another thread, after: not recorded.
+        uninstrument()
+        create_agent(model([calls[0]]), [issue_refund]).invoke(msg("x"))
+    finally:
+        uninstrument()
+    assert ran == ["ch_1", "ch_1"]
+    es = decisions(log)
+    approval = next(e for e in es if e["kind"] == "approval")
+    assert approval["principal"] == {"kind": "person", "id": "alice"}
+    intent = next(e for e in es if e.get("phase") == "intent" and "approval" in e)
+    assert intent["principal"] == {"kind": "agent", "id": "support"}
+    assert intent["action"] == {"type": "issue_refund", "target": "stripe:ch_1"}
+    assert intent["rule"] == {"ref": "policy:refund", "version": "14", "result": "allow"}
+    assert intent["approval"]["by"] == {"kind": "person", "id": "alice"}
+    refused = [e for e in es if e.get("status") == "refused"]
+    assert len(refused) == 1
+    assert len([e for e in es if e.get("phase") == "intent"]) == 2  # ch_1 approved, ch_2 refused
+    assert log.verify(log.fingerprint).ok
+    log.close()
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 11), reason="LangGraph's interrupt() needs Python 3.11 under asyncio"
+)
+def test_instrument_async_resume(tmp_path: Path) -> None:
+    import tenbri
+    from langgraph.types import Command
+
+    from tenbri_langgraph import uninstrument
+
+    log = tenbri.init(tmp_path / "s", keys=tmp_path / "keys", approver="person:bob")
+    tenbri.instrument_langchain(actions={"issue_refund": {"target": "stripe:{charge}"}})
+    hitl = HumanInTheLoopMiddleware(interrupt_on={"issue_refund": True})
+    agent = create_agent(
+        model([("issue_refund", {"charge": "ch_9", "amount": 5})]),
+        [issue_refund],
+        middleware=[hitl],
+        checkpointer=InMemorySaver(),
+    )
+    config: Any = {"configurable": {"thread_id": "t2"}}
+
+    async def main() -> None:
+        await agent.ainvoke({"messages": [("user", "refund")]}, config)
+        await agent.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config)
+
+    try:
+        asyncio.run(main())
+    finally:
+        uninstrument()
+    es = decisions(log)
+    assert [e["kind"] for e in es] == ["approval", "decision", "decision"]
+    assert es[0]["principal"] == {"kind": "person", "id": "bob"}
+    assert es[1]["action"] == {"type": "issue_refund", "target": "stripe:ch_9"}
+    assert es[1]["principal"] == {"kind": "agent", "id": "langgraph"}
+    log.close()
