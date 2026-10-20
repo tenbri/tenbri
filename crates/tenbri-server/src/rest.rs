@@ -50,7 +50,18 @@ TENBRI_INTERNAL (500). A 503 carries Retry-After.",
         license(name = "Apache-2.0", identifier = "Apache-2.0"),
     ),
     modifiers(&BearerToken),
-    components(schemas(ErrorBody, ErrorCode))
+    // Every body a route names: `route` documents operations, not the schemas they refer to.
+    components(schemas(
+        ErrorBody,
+        ErrorCode,
+        AppendedBody,
+        BatchBody,
+        BatchRequest,
+        QueriedBody,
+        QueryBody,
+        VerifyBody,
+        StatusBody,
+    ))
 )]
 struct ApiDoc;
 
