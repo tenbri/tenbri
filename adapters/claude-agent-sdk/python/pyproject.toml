@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tenbri-claude-agent-sdk"
+# Set by release.yml from the tag, like the npm packages: one version for everything.
+version = "0.0.0"
+description = "Tenbri for the Claude Agent SDK: every tool call a signed, provable decision."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = [
+  "tenbri>=0.1.0a2",
+  "claude-agent-sdk>=0.1.81",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: AsyncIO",
+  "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+otel = ["opentelemetry-api>=1.20"]
+
+[project.urls]
+Repository = "https://github.com/tenbri/tenbri"
