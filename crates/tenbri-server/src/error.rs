@@ -204,6 +204,18 @@ impl From<tenbri_writer::ReadError> for ApiError {
     }
 }
 
+impl From<tenbri_writer::ReceiptError> for ApiError {
+    fn from(e: tenbri_writer::ReceiptError) -> Self {
+        use tenbri_writer::ReceiptError as R;
+        match e {
+            R::Read(e) => e.into(),
+            R::NotFound => ApiError::new(ErrorCode::NotFound, e.to_string()),
+            // tenbrid seals a checkpoint before it gives up: it had no key to sign one with.
+            R::NotCheckpointed(_) => ApiError::new(ErrorCode::NoSessionKey, e.to_string()),
+        }
+    }
+}
+
 impl From<std::io::Error> for ApiError {
     fn from(e: std::io::Error) -> Self {
         ApiError::new(ErrorCode::StoreUnavailable, e.to_string())

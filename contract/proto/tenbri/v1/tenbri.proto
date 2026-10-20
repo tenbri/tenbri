@@ -23,6 +23,9 @@ service TenbriService {
   rpc AppendBatch(AppendBatchRequest) returns (AppendBatchResponse);
   // One entry by id.
   rpc GetEntry(GetEntryRequest) returns (GetEntryResponse);
+  // A receipt for one entry: a self-contained proof, checked offline against the stream's pinned
+  // key (spec/receipts.md).
+  rpc GetReceipt(GetReceiptRequest) returns (GetReceiptResponse);
   // Entries by input, action, principal, target or subject, in sequence order.
   rpc QueryEntries(QueryEntriesRequest) returns (QueryEntriesResponse);
   // Entries after `after_seq`, then new ones as they are written.
@@ -94,6 +97,16 @@ message GetEntryRequest {
 
 message GetEntryResponse {
   QueriedEntry entry = 1;
+}
+
+message GetReceiptRequest {
+  string stream = 1;
+  string id = 2;
+}
+
+message GetReceiptResponse {
+  // The receipt file, canonical JSON (spec/receipts.md), as `tenbri receipt verify` reads it.
+  bytes receipt = 1;
 }
 
 message QueryEntriesRequest {

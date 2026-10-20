@@ -6,6 +6,12 @@ all-features = true
 [advisories]
 # Unmaintained crates are reported for the whole graph; yanked versions fail.
 yanked = "deny"
+ignore = [
+  # Marvin: timing leaks in RSA decryption and signing with a private key. tenbri-anchor only
+  # verifies RSA signatures of timestamp authorities, with public keys; no fixed rsa release yet.
+  # Keep in step with .cargo/audit.toml.
+  { id = "RUSTSEC-2023-0071", reason = "rsa is used only to verify signatures (tenbri-anchor)" },
+]
 
 [licenses]
 # Permissive licenses Apache-2.0 can carry. A new one is a decision: add it here in the pull

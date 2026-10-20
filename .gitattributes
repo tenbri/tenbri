@@ -6,3 +6,6 @@ spec/vectors/** -text
 # (crates/tenbri-server/tests/contract.rs): LF everywhere.
 contract/** text eol=lf
 crates/tenbri-server/src/proto.rs text eol=lf
+
+# RFC 3161 fixtures: a token is over these exact bytes.
+crates/tenbri-anchor/tests/fixtures/** -text

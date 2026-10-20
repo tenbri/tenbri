@@ -24,6 +24,7 @@ s3 = ["tenbri-store/s3"]
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
+tenbri-anchor = { workspace = true, features = ["client"] }
 tenbri-core.workspace = true
 tenbri-crypt.workspace = true
 tenbri-index.workspace = true
@@ -33,6 +34,10 @@ tenbri-schema.workspace = true
 tenbri-store.workspace = true
 tenbri-writer.workspace = true
 tokio = { version = "1", features = ["macros", "rt", "time"] }
+
+[dev-dependencies]
+tenbri-anchor = { workspace = true, features = ["test-tsa"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 
 [lints]
 workspace = true

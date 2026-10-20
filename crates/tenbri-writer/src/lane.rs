@@ -44,6 +44,8 @@ impl Default for LaneConfig {
 
 struct Job {
     entries: Vec<Entry>,
+    /// Call [`Writer::seal`] once the batch is written.
+    seal: bool,
     done: oneshot::Sender<Vec<Result<Entry, WriteError>>>,
 }
 
@@ -110,7 +112,14 @@ impl Lane {
         let (done, rx) = oneshot::channel();
         if let Err(e) = self
             .tx
-            .send_timeout(Job { entries, done }, self.deadline)
+            .send_timeout(
+                Job {
+                    entries,
+                    seal: false,
+                    done,
+                },
+                self.deadline,
+            )
             .await
         {
             return fail(match e {
@@ -123,16 +132,23 @@ impl Lane {
 
     /// Waits until everything queued before it is written (or failed).
     pub async fn flush(&self) {
+        self.barrier(false).await;
+    }
+
+    /// Waits until everything queued before it is written, then lets the hook act at once
+    /// ([`Writer::seal`]): with [`crate::Checkpoints`], a checkpoint covering all of it.
+    pub async fn seal(&self) {
+        self.barrier(true).await;
+    }
+
+    async fn barrier(&self, seal: bool) {
         let (done, rx) = oneshot::channel();
-        if self
-            .tx
-            .send(Job {
-                entries: vec![],
-                done,
-            })
-            .await
-            .is_ok()
-        {
+        let job = Job {
+            entries: vec![],
+            seal,
+            done,
+        };
+        if self.tx.send(job).await.is_ok() {
             let _ = rx.await;
         }
     }
@@ -174,6 +190,7 @@ async fn run<S: Store, H: Hook<S>>(
                 _ => break,
             }
         }
+        let seal = jobs.iter().any(|j| j.seal);
         let (batches, done): (Vec<_>, Vec<_>) =
             jobs.into_iter().map(|j| (j.entries, j.done)).unzip();
         let counts: Vec<usize> = batches.iter().map(Vec::len).collect();
@@ -200,6 +217,9 @@ async fn run<S: Store, H: Hook<S>>(
         }
         .into_iter()
         .skip(skip);
+        if seal {
+            w.seal().await;
+        }
         for (d, n) in done.into_iter().zip(counts) {
             let _ = d.send(results.by_ref().take(n).collect());
         }
