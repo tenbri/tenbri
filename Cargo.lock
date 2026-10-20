@@ -3404,6 +3404,7 @@ name = "tenbri-cli"
 version = "0.1.0-beta.2"
 dependencies = [
  "clap",
+ "serde",
  "serde_json",
  "tenbri-anchor",
  "tenbri-core",

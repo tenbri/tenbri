@@ -80,11 +80,20 @@ fn round_trip() {
     let o = tenbri(&keys, &["verify", st, "--key", &fp], "");
     assert_eq!(o.status.code(), Some(0), "{o:?}");
     assert!(out(&o).starts_with("verified 4 entries"));
-    assert_eq!(
-        tenbri(&keys, &["verify", st], "").status.code(),
-        Some(3),
-        "unpinned"
+    // Without --key: the pin init recorded.
+    let o = tenbri(&keys, &["verify", st], "");
+    assert_eq!(o.status.code(), Some(0), "{o:?}");
+    assert!(out(&o).contains("(the pin recorded in "), "{}", out(&o));
+    // Another machine has no pin: it is told the command, never pinned for it.
+    let other = t.join("other-keys");
+    let o = tenbri(&other, &["verify", st], "");
+    assert_eq!(o.status.code(), Some(3), "unpinned");
+    assert!(
+        out(&o).contains(&format!("  tenbri verify {st} --key {fp}\n")),
+        "{}",
+        out(&o)
     );
+    assert!(!other.join("pins").exists());
 
     let o = tenbri(
         &keys,
@@ -452,5 +461,127 @@ fn query_through_the_index() {
         assert!(o.stdout.is_empty(), "{o:?}");
     }
     assert_eq!(rows(&["query", st, "--input", "policy:refund@13"]).len(), 1);
+    std::fs::remove_dir_all(&t).unwrap();
+}
+
+/// One line per entry with --pretty (a terminal's default), JSON with --json (a pipe's), `show`
+/// with its chain, the stream from TENBRI_STREAM, and append's help and errors.
+#[test]
+fn for_people() {
+    let t = std::env::temp_dir().join(format!("tenbri-cli-people-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&t);
+    let (keys, s) = (t.join("keys"), t.join("audit").join("support"));
+    let st = s.to_str().unwrap();
+    let env = [
+        ("TENBRI_STREAM", st.to_owned()),
+        (
+            "TENBRI_INDEX_DIR",
+            t.join("index").to_string_lossy().into_owned(),
+        ),
+    ];
+    let run = |args: &[&str], stdin: &str| tenbri_env(&keys, args, stdin, &env);
+    assert!(run(&["init"], "").status.success());
+
+    // The example in append --help, verbatim.
+    let help = out(&run(&["append", "--help"], ""));
+    let example = help
+        .split("echo '")
+        .nth(1)
+        .and_then(|e| e.split("' | tenbri append").next())
+        .unwrap();
+    let o = run(&["append"], example);
+    assert!(o.status.success(), "{o:?}");
+    assert!(
+        help.contains("principal.kind  agent, person, service"),
+        "{help}"
+    );
+    let id = serde_json::from_str::<serde_json::Value>(out(&o).trim()).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let outcome = format!(
+        r#"{{"kind":"decision","phase":"outcome","source":"sdk","intent":"{id}","status":"ok","principal":{{"kind":"agent","id":"support-bot"}},"action":{{"type":"reply_ticket"}}}}"#
+    );
+    assert!(run(&["append"], &outcome).status.success());
+    assert!(run(&["append"], r#"{"kind":"note"}"#).status.success());
+
+    // A wrong value: the allowed ones, and no position in bytes the user never typed.
+    let o = run(&["append"], r#"{"kind":"decison"}"#);
+    assert_eq!(o.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("kind            decision, approval"), "{err}");
+    assert!(!err.contains("column"), "{err}");
+    let err =
+        String::from_utf8_lossy(&run(&["append"], r#"{"kind":"decision"}"#).stderr).into_owned();
+    assert!(err.contains("phase           intent, outcome"), "{err}");
+
+    // Lines: key entries hidden unless --all, verified against the recorded pin.
+    let lines = out(&run(&["query", "--pretty"], ""));
+    let rows: Vec<&str> = lines.lines().collect();
+    assert_eq!(rows.len(), 3, "{lines}");
+    assert!(rows[0].trim_start().starts_with("3  "), "{lines}");
+    for w in [
+        "decision intent",
+        "agent:support-bot",
+        "reply_ticket zendesk:ticket/1042",
+        "verified",
+    ] {
+        assert!(rows[0].contains(w), "{w}: {lines}");
+    }
+    assert!(rows[1].contains(" ok "), "{lines}");
+    assert_eq!(
+        out(&run(&["query", "--pretty", "--all"], ""))
+            .lines()
+            .count(),
+        5
+    );
+    assert_eq!(
+        out(&run(&["tail", "--pretty", "--no-follow", "-n", "2"], ""))
+            .lines()
+            .count(),
+        2
+    );
+    // JSON is the default off a terminal, and --json gives the same bytes.
+    for cmd in ["query", "tail"] {
+        let args: &[&str] = if cmd == "tail" {
+            &["tail", "--no-follow"]
+        } else {
+            &["query"]
+        };
+        let plain = out(&run(args, ""));
+        assert_eq!(plain, out(&run(&[args, &["--json"]].concat(), "")));
+        assert!(plain.lines().all(|l| l.starts_with('{')), "{plain}");
+    }
+    assert_eq!(out(&run(&["query"], "")).lines().count(), 5);
+    assert!(out(&run(&["query"], "")).contains(r#""verification":"unpinned""#));
+
+    // show: the outcome, its intent, and the verification.
+    let shown = out(&run(&["show", "4", "--pretty"], ""));
+    assert!(shown.starts_with("seq 4  decision outcome"), "{shown}");
+    assert!(shown.contains(&format!("intent       {id}")), "{shown}");
+    assert!(
+        shown.contains("verification verified, pinned to sha256:"),
+        "{shown}"
+    );
+    let chain: Vec<&str> = shown.split("chain:\n").nth(1).unwrap().lines().collect();
+    assert_eq!(chain.len(), 2, "{shown}");
+    assert!(chain[1].starts_with('>'), "{shown}");
+    // By id, with the stream given; as JSON off a terminal.
+    let json = out(&run(&["show", st, &id], ""));
+    let seqs: Vec<u64> = json
+        .lines()
+        .map(|l| {
+            serde_json::from_str::<serde_json::Value>(l).unwrap()["seq"]
+                .as_u64()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(seqs, [3, 4]);
+    assert_eq!(run(&["show", "99"], "").status.code(), Some(2));
+    let o = run(
+        &["show", "5", "--key", &format!("sha256:{}", "0".repeat(64))],
+        "",
+    );
+    assert_eq!(o.status.code(), Some(1), "a wrong --key: {o:?}");
     std::fs::remove_dir_all(&t).unwrap();
 }

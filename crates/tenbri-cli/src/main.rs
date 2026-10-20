@@ -3,11 +3,12 @@
 //! Exit codes, stable from 0.1.0: 0 success; 1 the stream does not verify, or does not match the
 //! `--checkpoint` given (truncated behind it, rewritten, or not signed by the stream); the first
 //! broken sequence number is printed; 2 any other error, a malformed checkpoint file among them;
-//! 3 `verify` without `--key`: the stream is consistent with its own genesis key, which proves
-//! nothing about who wrote it; `schema check` exits 1 when an entry breaks its action's schema;
-//! `receipt verify` exits 1 when the receipt does not verify, with the reason.
+//! 3 `verify` without `--key` or a pin `init` recorded: the stream is consistent with its own
+//! genesis key, which proves nothing about who wrote it; `schema check` exits 1 when an entry
+//! breaks its action's schema; `receipt verify` exits 1 when the receipt does not verify, with the
+//! reason.
 
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
@@ -47,6 +48,7 @@ enum Command {
     Init {
         /// The stream: a directory, <root>/<stream>, created or empty; or an object-store prefix,
         /// s3://bucket/<root>/<stream> or r2://bucket/<root>/<stream>, empty.
+        #[arg(env = "TENBRI_STREAM")]
         path: String,
         /// Keep the secret keys in the OS keychain instead of key files.
         #[cfg(feature = "keychain")]
@@ -54,9 +56,14 @@ enum Command {
         keychain: bool,
     },
     /// Append one entry, read as JSON on stdin; print it as stored.
-    Append { path: String },
+    #[command(after_help = format!("{APPEND_EXAMPLE}\n\n{ALLOWED}"))]
+    Append {
+        #[arg(env = "TENBRI_STREAM")]
+        path: String,
+    },
     /// Check canonical bytes, chain, signatures and keys against a pinned key.
     Verify {
+        #[arg(env = "TENBRI_STREAM")]
         path: String,
         /// Fingerprint (sha256:…) or public key (ed25519:…) of the stream's genesis key.
         #[arg(long, value_name = "FINGERPRINT")]
@@ -75,6 +82,7 @@ enum Command {
     /// `--verify` checks them against the whole stream. Without an index, reads and verifies the
     /// whole stream.
     Query {
+        #[arg(env = "TENBRI_STREAM")]
         path: String,
         /// An input the entry used, as ref@version (policy:refund@14), or ref for any version;
         /// repeat to require several.
@@ -118,6 +126,24 @@ enum Command {
         verify: bool,
         #[arg(long, value_name = "FINGERPRINT")]
         key: Option<String>,
+        #[command(flatten)]
+        format: Format,
+    },
+    /// Print one entry, by sequence number or id, with the intent, approval, outcome or reconcile
+    /// it is linked to, and whether the stream verifies.
+    Show {
+        /// [STREAM] SEQ|ID: the stream may come from TENBRI_STREAM instead.
+        #[arg(required = true, num_args = 1..=2, value_name = "STREAM] [SEQ|ID")]
+        args: Vec<String>,
+        /// Fingerprint of the stream's genesis key [default: the pin `tenbri init` recorded].
+        #[arg(long, value_name = "FINGERPRINT")]
+        key: Option<String>,
+        /// One JSON object per entry of the chain, as when stdout is not a terminal.
+        #[arg(long, conflicts_with = "pretty")]
+        json: bool,
+        /// Fields and chain, as when stdout is a terminal.
+        #[arg(long)]
+        pretty: bool,
     },
     /// The stream's index: a derived view `query` uses, kept in $TENBRI_INDEX_DIR or the user's
     /// cache directory; deleting it loses nothing.
@@ -127,6 +153,7 @@ enum Command {
     },
     /// Print the last entries, then follow new ones as they are written.
     Tail {
+        #[arg(env = "TENBRI_STREAM")]
         path: String,
         /// How many existing entries to print first.
         #[arg(short = 'n', default_value_t = 10)]
@@ -136,9 +163,12 @@ enum Command {
         no_follow: bool,
         #[arg(long, value_name = "FINGERPRINT")]
         key: Option<String>,
+        #[command(flatten)]
+        format: Format,
     },
     /// Seal and sign a checkpoint of the whole stream now; with --tsa, timestamp it (RFC 3161).
     Checkpoint {
+        #[arg(env = "TENBRI_STREAM")]
         path: String,
         /// The URL of an RFC 3161 timestamp authority: its token is stored next to the
         /// checkpoint (anchors/<size>.tsr) and goes into receipts.
@@ -159,6 +189,7 @@ enum Command {
     /// confirmed, and record the erasure in the stream. The chain, checkpoints and receipts still
     /// verify.
     Erase {
+        #[arg(env = "TENBRI_STREAM")]
         path: String,
         #[command(flatten)]
         who: Who,
@@ -179,6 +210,56 @@ enum Command {
     },
 }
 
+/// How `query` and `tail` print: one line per entry on a terminal, JSON otherwise.
+#[derive(Args)]
+struct Format {
+    /// One JSON object per line, as when stdout is not a terminal.
+    #[arg(long, conflicts_with = "pretty")]
+    json: bool,
+    /// One line per entry, as when stdout is a terminal.
+    #[arg(long)]
+    pretty: bool,
+    /// One-line output: key entries too.
+    #[arg(long)]
+    all: bool,
+}
+
+impl Format {
+    fn human(&self) -> bool {
+        !self.json && (self.pretty || io::stdout().is_terminal())
+    }
+    /// Whether `e` is printed: every entry as JSON, key entries on lines only with --all.
+    fn keeps(&self, e: &Entry) -> bool {
+        !self.human() || self.all || e.kind != tenbri_core::Kind::Key
+    }
+}
+
+const APPEND_EXAMPLE: &str = r#"The writer fills v, stream, seq, prev, signer and sig; id and ts are optional. A decision intent
+needs kind, phase, source, principal and action:
+
+  echo '{"kind":"decision","phase":"intent","source":"sdk",
+         "principal":{"kind":"agent","id":"support-bot"},
+         "action":{"type":"reply_ticket","target":"zendesk:ticket/1042"}}' | tenbri append ./audit/support
+
+Its outcome names the intent's id and adds a status:
+
+  {"kind":"decision","phase":"outcome","source":"sdk","intent":"<id>","status":"ok",
+   "principal":{"kind":"agent","id":"support-bot"},"action":{"type":"reply_ticket"}}
+
+Every field and rule: spec/format-v1.md, section 4."#;
+
+/// The values of the entry's enumerated fields, printed with `append --help` and on its
+/// `invalid_field` errors; `allowed_values_match_the_format` keeps them in step with tenbri-core.
+const ALLOWED: &str = "\
+allowed values:
+  kind            decision, approval, key, reconcile, note
+  phase           intent, outcome (decision entries only)
+  source          sdk, proxy, ingest
+  status          ok, error, refused, unknown (outcomes and reconciles)
+  principal.kind  agent, person, service
+  durability      local, replicated, postgres
+  links[].rel     cause, handoff, approval";
+
 /// Whose data keys: a subject's, or the tenant's (entries without a subject).
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -194,9 +275,13 @@ struct Who {
 #[derive(Subcommand)]
 enum KeysCommand {
     /// List the signing keys and the data keys (subjects and key epochs); never a secret.
-    List { path: String },
+    List {
+        #[arg(env = "TENBRI_STREAM")]
+        path: String,
+    },
     /// Print a subject's data keys as JSON, for a backup kept apart from the log.
     Export {
+        #[arg(env = "TENBRI_STREAM")]
         path: String,
         #[command(flatten)]
         who: Who,
@@ -207,6 +292,7 @@ enum KeysCommand {
     /// Start a new data key epoch for a subject and record it in the stream; older epochs keep
     /// opening older data until erased.
     Rotate {
+        #[arg(env = "TENBRI_STREAM")]
         path: String,
         #[command(flatten)]
         who: Who,
@@ -221,6 +307,7 @@ enum ReceiptCommand {
     /// Write a receipt for entries of a stream: the entries, the stream's key history, a signed
     /// checkpoint covering them and their inclusion proofs, and its RFC 3161 token if it has one.
     Create {
+        #[arg(env = "TENBRI_STREAM")]
         path: String,
         /// An entry's sequence number or id; repeat for a receipt proving several.
         #[arg(long, required = true, value_name = "SEQ|ID")]
@@ -262,6 +349,7 @@ enum SchemaCommand {
 enum IndexCommand {
     /// Delete the stream's index and build it again from every batch.
     Rebuild {
+        #[arg(env = "TENBRI_STREAM")]
         path: String,
         /// The backend: sqlite (one file) or parquet (files any Arrow tool reads).
         #[arg(long, default_value = "sqlite")]
@@ -324,7 +412,10 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
             key,
             checkpoint,
         } => {
-            let pin = key.as_deref().map(pin).transpose()?;
+            let (pin, pins) = resolve_pin(key.as_deref(), path, cli.keys.as_deref())?;
+            let recorded = pins
+                .map(|f| format!(" (the pin recorded in {})", f.display()))
+                .unwrap_or_default();
             let note = checkpoint
                 .as_deref()
                 .map(|f| {
@@ -339,7 +430,10 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
             let stream = r.stream.as_deref().unwrap_or("?");
             if let Some(b) = &r.broken {
                 println!("broken at seq {}: {}", b.seq, b.error);
-                println!("{} entries verified before it, stream {stream}", r.entries);
+                println!(
+                    "{} entries verified before it, stream {stream}{recorded}",
+                    r.entries
+                );
                 return Ok(1);
             }
             if let Some(note) = &note {
@@ -368,7 +462,7 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
             }
             if let Some(pin) = pin {
                 println!(
-                    "verified {} entries, stream {stream}, pinned to {pin}",
+                    "verified {} entries, stream {stream}, pinned to {pin}{recorded}",
                     r.entries
                 );
                 return Ok(0);
@@ -377,6 +471,14 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
             println!(
                 "NOT pinned: this only shows the stream agrees with its own genesis key; pass --key <fingerprint>"
             );
+            // ponytail: a second read for the genesis key; verify's report could carry it.
+            let mut reader = Reader::new(&store, None);
+            if let Some(fp) = read(&mut reader).await?.first().and_then(genesis) {
+                println!(
+                    "its genesis key is {fp}; if the stream's owner gave you that fingerprint, pin it:"
+                );
+                println!("  tenbri verify {path} --key {fp}");
+            }
             Ok(3)
         }
         Command::Query {
@@ -395,8 +497,9 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
             limit,
             verify,
             key,
+            format,
         } => {
-            let pin = key.as_deref().map(pin).transpose()?;
+            let pin = lines_pin(key.as_deref(), path, cli.keys.as_deref(), format)?;
             let now = now_ms();
             let time = |t: &Option<String>, flag: &str| {
                 t.as_deref()
@@ -422,7 +525,7 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
             };
             let limit = limit.unwrap_or(usize::MAX);
             let store = store(path).await?;
-            query(&store, &filter, limit, *verify, pin.as_deref()).await
+            query(&store, &filter, limit, *verify, pin.as_deref(), format).await
         }
         Command::Index {
             command: IndexCommand::Rebuild { path, backend },
@@ -448,20 +551,57 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
             lines,
             no_follow,
             key,
+            format,
         } => {
-            let pin = key.as_deref().map(pin).transpose()?;
+            let pin = lines_pin(key.as_deref(), path, cli.keys.as_deref(), format)?;
+            let mark = if pin.is_some() {
+                "verified"
+            } else {
+                "unpinned"
+            };
             let store = store(path).await?;
             let mut r = Reader::new(&store, pin.as_deref());
-            let first = read(&mut r).await?;
-            print_lines(&first[first.len().saturating_sub(*lines)..])?;
+            let first: Vec<Entry> = read(&mut r)
+                .await?
+                .into_iter()
+                .filter(|e| format.keeps(e))
+                .collect();
+            print_entries(&first[first.len().saturating_sub(*lines)..], format, mark)?;
             if *no_follow {
                 return Ok(0);
             }
             // ponytail: polls HEAD every 500 ms; a file watcher when latency matters.
             loop {
                 tokio::time::sleep(Duration::from_millis(500)).await;
-                print_lines(&read(&mut r).await?)?;
+                let new: Vec<Entry> = read(&mut r)
+                    .await?
+                    .into_iter()
+                    .filter(|e| format.keeps(e))
+                    .collect();
+                print_entries(&new, format, mark)?;
             }
+        }
+        Command::Show {
+            args,
+            key,
+            json,
+            pretty,
+        } => {
+            let (path, want) = match &args[..] {
+                [path, want] => (path.clone(), want),
+                [want] => (
+                    std::env::var("TENBRI_STREAM")
+                        .ok()
+                        .filter(|s| !s.is_empty())
+                        .ok_or_else(|| {
+                            Fail(2, "no stream: pass one, or set TENBRI_STREAM".into())
+                        })?,
+                    want,
+                ),
+                _ => unreachable!("clap takes one or two"),
+            };
+            let json = *json || !(*pretty || io::stdout().is_terminal());
+            show(&path, want, key.as_deref(), cli.keys.as_deref(), json).await
         }
         Command::Checkpoint { path, tsa } => checkpoint(path, &keys_dir()?, tsa.as_deref()).await,
         Command::Receipt {
@@ -594,13 +734,9 @@ fn receipt_verify(file: &Path, pin: &str, tsa_roots: Option<&Path>) -> Result<u8
 
 /// An entry's kind, and its phase if it has one: `decision intent`.
 fn kind(e: &Entry) -> String {
-    let name = |v: Result<canon::Value, _>| match v {
-        Ok(canon::Value::Str(s)) => s,
-        _ => "?".into(),
-    };
-    let k = name(canon::from_serialize(&e.kind));
+    let k = name(&e.kind);
     match &e.phase {
-        Some(p) => format!("{k} {}", name(canon::from_serialize(p))),
+        Some(p) => format!("{k} {}", name(p)),
         None => k,
     }
 }
@@ -755,6 +891,7 @@ async fn query<S: Store>(
     limit: usize,
     check: bool,
     pin: Option<&str>,
+    format: &Format,
 ) -> Result<u8, Fail> {
     let verified = if pin.is_some() {
         "verified"
@@ -835,6 +972,13 @@ async fn query<S: Store>(
     let as_of = serde_json::to_string(&state)?;
     let mut out = io::stdout().lock();
     for h in hits {
+        if format.human() {
+            let e: Entry = serde_json::from_str(&h.line)?;
+            if format.keeps(&e) {
+                writeln!(out, "{}", summary(&e, status))?;
+            }
+            continue;
+        }
         writeln!(
             out,
             "{{\"verification\":\"{status}\",\"entry\":{},\"seq\":{},\"hash\":\"{}\",\"as_of\":{as_of}}}",
@@ -929,12 +1073,212 @@ fn line(e: &Entry) -> String {
     .expect("UTF-8")
 }
 
-fn print_lines(entries: &[Entry]) -> io::Result<()> {
+fn print_entries(entries: &[Entry], format: &Format, mark: &str) -> io::Result<()> {
     let mut out = io::stdout().lock();
     for e in entries {
-        writeln!(out, "{}", line(e))?;
+        if format.human() {
+            writeln!(out, "{}", summary(e, mark))?;
+        } else {
+            writeln!(out, "{}", line(e))?;
+        }
     }
     out.flush()
+}
+
+/// An enum member as the format spells it: `decision`.
+fn name<T: serde::Serialize>(v: &T) -> String {
+    match canon::from_serialize(v) {
+        Ok(canon::Value::Str(s)) => s,
+        _ => "?".into(),
+    }
+}
+
+fn principal(p: &Principal) -> String {
+    format!("{}:{}", name(&p.kind), p.id)
+}
+
+fn action(a: &tenbri_core::Action) -> String {
+    match &a.target {
+        Some(t) => format!("{} {t}", a.r#type),
+        None => a.r#type.clone(),
+    }
+}
+
+/// One line for an entry: seq, ts, kind and phase, principal, action, status, verification.
+fn summary(e: &Entry, mark: &str) -> String {
+    let or_dash = |s: Option<String>| s.unwrap_or_else(|| "-".into());
+    format!(
+        "{:>6}  {}  {:<17} {:<24} {:<32} {:<8} {mark}",
+        e.seq,
+        e.ts,
+        kind(e),
+        or_dash(e.principal.as_ref().map(principal)),
+        or_dash(e.action.as_ref().map(action)),
+        or_dash(e.status.as_ref().map(name)),
+    )
+}
+
+/// The fingerprint of the genesis key a stream's first entry certifies.
+fn genesis(first: &Entry) -> Option<String> {
+    match &first.key {
+        Some(tenbri_core::KeyEvent::Certify { public, .. }) => {
+            sign::decode_key(public).ok().map(|k| sign::fingerprint(&k))
+        }
+        _ => None,
+    }
+}
+
+/// Where `tenbri init` records the fingerprints of the streams it created, one `<location>
+/// <fingerprint>` per line, like ssh's known_hosts.
+const PINS: &str = "pins";
+
+/// A stream's location as pins records it: an absolute path, or the URL as given.
+fn location(path: &str) -> String {
+    if tenbri_store::is_url(path) {
+        return path.to_owned();
+    }
+    std::fs::canonicalize(path).map_or_else(|_| path.to_owned(), |p| p.display().to_string())
+}
+
+/// The fingerprint to check `path` against: `--key`, else the pin `tenbri init` recorded for it,
+/// with the pins file it came from.
+fn resolve_pin(
+    key: Option<&str>,
+    path: &str,
+    keys: Option<&Path>,
+) -> Result<(Option<String>, Option<PathBuf>), Fail> {
+    if let Some(k) = key {
+        return Ok((Some(pin(k)?), None));
+    }
+    let Some(file) = keys
+        .map(Path::to_owned)
+        .or_else(tenbri_keys::default_dir)
+        .map(|d| d.join(PINS))
+    else {
+        return Ok((None, None));
+    };
+    let loc = location(path);
+    // The last pin wins: a stream re-created at the same place is pinned anew.
+    let found = std::fs::read_to_string(&file).ok().and_then(|text| {
+        text.lines().rev().find_map(|l| {
+            let (at, fp) = l.rsplit_once(' ')?;
+            (at == loc).then(|| fp.to_owned())
+        })
+    });
+    match found {
+        Some(fp) => Ok((Some(pin(&fp)?), Some(file))),
+        None => Ok((None, None)),
+    }
+}
+
+/// The pin of `query` and `tail`: `--key`; on one-line output, else the recorded pin. JSON output
+/// stays as it was without `--key`, for scripts.
+fn lines_pin(
+    key: Option<&str>,
+    path: &str,
+    keys: Option<&Path>,
+    format: &Format,
+) -> Result<Option<String>, Fail> {
+    match key {
+        None if format.human() => Ok(resolve_pin(None, path, keys)?.0),
+        k => k.map(pin).transpose(),
+    }
+}
+
+/// `tenbri show`: the entry `want` (a seq or an id), its chain, and whether the stream verifies.
+async fn show(
+    path: &str,
+    want: &str,
+    key: Option<&str>,
+    keys: Option<&Path>,
+    json: bool,
+) -> Result<u8, Fail> {
+    let (pin, pins) = resolve_pin(key, path, keys)?;
+    let store = store(path).await?;
+    let mut r = Reader::new(&store, pin.as_deref());
+    let entries = read(&mut r).await?;
+    if let Some(b) = r.chain().invalidated() {
+        return Err(Fail(1, format!("the stream does not verify: {b}")));
+    }
+    let hash = |e: &Entry| format!("sha256:{}", encoding::hex(&r.hashes()[e.seq as usize - 1]));
+    let e = entries
+        .iter()
+        .find(|e| e.id == want || want.parse() == Ok(e.seq))
+        .ok_or_else(|| Fail(2, format!("no entry {want} in {path}")))?;
+    // The intent the entry belongs to: itself, or the one its outcome or reconcile names.
+    let root = match e.phase {
+        Some(tenbri_core::Phase::Intent) => Some(e.id.as_str()),
+        _ => e.intent.as_deref(),
+    };
+    let own = hash(e);
+    let linked = |x: &Entry| {
+        x.seq == e.seq
+            || root.is_some_and(|i| x.id == i || x.intent.as_deref() == Some(i))
+            || x.approval.as_ref().is_some_and(|a| a.entry == own)
+    };
+    // And the approvals those cite.
+    let cited: Vec<&str> = entries
+        .iter()
+        .filter(|x| linked(x))
+        .filter_map(|x| x.approval.as_ref().map(|a| a.entry.as_str()))
+        .collect();
+    let chain: Vec<&Entry> = entries
+        .iter()
+        .filter(|x| linked(x) || cited.contains(&hash(x).as_str()))
+        .collect();
+    let status = if pin.is_some() {
+        "verified"
+    } else {
+        "unpinned"
+    };
+    let mut out = io::stdout().lock();
+    if json {
+        for x in chain {
+            writeln!(
+                out,
+                "{{\"verification\":\"{status}\",\"entry\":{},\"seq\":{},\"hash\":\"{}\"}}",
+                line(x),
+                x.seq,
+                hash(x)
+            )?;
+        }
+        return Ok(0);
+    }
+    writeln!(out, "seq {}  {}  {}", e.seq, kind(e), e.id)?;
+    let field = |out: &mut io::StdoutLock, k: &str, v: String| writeln!(out, "  {k:<12} {v}");
+    field(&mut out, "ts", e.ts.clone())?;
+    field(&mut out, "hash", own.clone())?;
+    let canon::Value::Obj(members) = canon::from_serialize(e)? else {
+        unreachable!("an entry is an object")
+    };
+    for (k, v) in members {
+        let v = match (k.as_str(), v) {
+            ("v" | "id" | "stream" | "seq" | "ts" | "kind" | "phase" | "prev" | "sig", _) => {
+                continue;
+            }
+            ("principal", _) => e.principal.as_ref().map(principal).unwrap_or_default(),
+            ("action", _) => e.action.as_ref().map(action).unwrap_or_default(),
+            (_, canon::Value::Str(s)) => s,
+            (_, v) => String::from_utf8(canon::to_vec(&v)).expect("UTF-8"),
+        };
+        field(&mut out, &k, v)?;
+    }
+    let verdict = match (&pin, &pins) {
+        (Some(p), None) => format!("verified, pinned to {p}"),
+        (Some(p), Some(f)) => format!("verified, pinned to {p} (recorded in {})", f.display()),
+        (None, _) => format!(
+            "unpinned: consistent with its own genesis key only; `tenbri verify {path}` prints the --key to pin"
+        ),
+    };
+    field(&mut out, "verification", verdict)?;
+    if chain.len() > 1 {
+        writeln!(out, "\nchain:")?;
+        for x in chain {
+            let at = if x.seq == e.seq { ">" } else { " " };
+            writeln!(out, "{at}{}", summary(x, status))?;
+        }
+    }
+    Ok(0)
 }
 
 async fn init(path: &str, keys: &Path, backend: Backend) -> Result<u8, Fail> {
@@ -956,12 +1300,20 @@ async fn init(path: &str, keys: &Path, backend: Backend) -> Result<u8, Fail> {
     ks.save(&stream_key, backend)?;
     ks.save(&session, backend)?;
     Writer::create(store, &stream_key, session).await?;
+    let pins = keys.join(PINS);
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&pins)
+        .and_then(|mut f| writeln!(f, "{} {}", location(path), stream_key.fingerprint()))
+        .map_err(|e| Fail(2, format!("{}: {e}", pins.display())))?;
     println!("created stream {id} at {path}");
     println!(
         "stream key fingerprint (pin it): {}",
         stream_key.fingerprint()
     );
     println!("keys: {}", ks.dir().display());
+    println!("pinned in {}: tenbri verify {path} uses it", pins.display());
     println!(
         "verify with: tenbri verify {} --key {}",
         path,
@@ -1009,16 +1361,72 @@ async fn open_writer(store: AnyStore, ks: KeyStore) -> Result<Writer<AnyStore, C
     Ok(w)
 }
 
+/// An append error, with the allowed values when a field had the wrong one.
+fn invalid(msg: String) -> Fail {
+    if msg.contains("invalid_field") {
+        return Fail(
+            2,
+            format!("{msg}\n{ALLOWED}\nan example: tenbri append --help"),
+        );
+    }
+    Fail(2, msg)
+}
+
 async fn append(path: &str, keys: &Path) -> Result<u8, Fail> {
     let mut input = vec![];
     io::stdin().read_to_end(&mut input)?;
-    let draft = draft_from_json(&input).map_err(|e| Fail(2, format!("stdin: {e}")))?;
+    let draft = draft_from_json(&input).map_err(|mut e| {
+        // serde's position is in the canonicalised bytes, not in what was typed.
+        if let Some(i) = e.detail.find(" at line ") {
+            e.detail.truncate(i);
+        }
+        invalid(format!("stdin: {e}"))
+    })?;
     let (store, ks) = open_stream(path, keys).await?;
     let mut w = open_writer(store, ks).await?;
     let now = now_ms();
     w.reconcile_stale(now, RECONCILE_AFTER_MS, draft.intent.as_deref())
         .await?;
-    let e = w.append(draft).await?;
+    let e = w.append(draft).await.map_err(|e| invalid(e.to_string()))?;
     println!("{}", line(&e));
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ALLOWED;
+    use tenbri_core::{Durability, Kind, Phase, PrincipalKind, Rel, Source, Status};
+
+    /// Each line of ALLOWED lists exactly the variants tenbri-core accepts, in its order.
+    #[test]
+    fn allowed_values_match_the_format() {
+        fn expected<T: serde::de::DeserializeOwned>() -> String {
+            let e = serde_json::from_str::<T>("\"?\"")
+                .err()
+                .unwrap()
+                .to_string();
+            let list = e.split("expected ").nth(1).unwrap();
+            list.split('`')
+                .skip(1)
+                .step_by(2)
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+        let want = [
+            ("kind", expected::<Kind>()),
+            ("phase", expected::<Phase>()),
+            ("source", expected::<Source>()),
+            ("status", expected::<Status>()),
+            ("principal.kind", expected::<PrincipalKind>()),
+            ("durability", expected::<Durability>()),
+            ("links[].rel", expected::<Rel>()),
+        ];
+        let lines: Vec<&str> = ALLOWED.lines().skip(1).collect();
+        assert_eq!(lines.len(), want.len());
+        for (l, (field, values)) in lines.iter().zip(want) {
+            let (f, v) = l.trim().split_once(' ').unwrap();
+            assert_eq!(f, field);
+            assert!(v.trim().starts_with(&values), "{field}: {v} vs {values}");
+        }
+    }
 }
