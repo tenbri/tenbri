@@ -97,14 +97,14 @@ v0.1.0 ships every feature below, each labelled:
 |---|---|---|
 | Format and integrity | ✅ Entry format v1 · ✅ canonical bytes · ✅ hash chain · ✅ signatures · ✅ intent and outcome entries · ✅ links · ✅ Merkle checkpoints · ⬜ receipts | |
 | Keys | ✅ Stream and session keys · ✅ rotation · ✅ revocation · ✅ key file · ✅ OS keychain (macOS, Windows) | ⬜ PKCS#11 · ⬜ cloud KMS · ⬜ passkey attestations |
-| Storage | ✅ Local disk · 🚧 AWS S3 · 🚧 Cloudflare R2 · 🚧 MinIO | ⬜ Google Cloud Storage · ⬜ Azure Blob · ⬜ Postgres |
+| Storage | ✅ Local disk · ✅ AWS S3 · ✅ Cloudflare R2 · ✅ MinIO | ⬜ Google Cloud Storage · ⬜ Azure Blob · ⬜ Postgres |
 | Anchoring | ⬜ Checkpoint publishing to auditors · ⬜ RFC 3161 timestamps | ⬜ Sigstore Rekor · ⬜ witnesses |
 | Privacy | ⬜ Blob encryption · ⬜ per-subject keyed digests and erasure · ⬜ local key store | |
 | Query | ⬜ SQLite or Parquet index | ⬜ `--as-of` time travel · ⬜ Iceberg index |
-| CLI | ✅ init · ✅ append · ✅ verify · ✅ query · ✅ tail · 🚧 checkpoint · ⬜ receipt · ⬜ keys · ⬜ erase · ⬜ gc | ⬜ export · ⬜ mcp · ⬜ proxy · ⬜ ingest |
+| CLI | ✅ init · ✅ append · ✅ verify · ✅ query · ✅ tail · ✅ checkpoint · ⬜ receipt · ⬜ keys · ⬜ erase · ⬜ gc | ⬜ export · ⬜ mcp · ⬜ proxy · ⬜ ingest |
 | Bindings | ✅ Rust · ⬜ Python · ⬜ Node · ⬜ WASM verifier | |
 | Adapters | ⬜ Claude Agent SDK · ⬜ OpenAI Agents SDK · ⬜ LangGraph and LangChain | ⬜ Pydantic AI · ⬜ Vercel AI SDK · ⬜ Mastra · ⬜ Google ADK · ⬜ AWS Strands · ⬜ Microsoft Agent Framework · ⬜ CrewAI · ⬜ LlamaIndex · ⬜ A2A |
-| APIs and tooling | 🚧 tenbrid REST and gRPC · ✅ action schemas · ⬜ OpenTelemetry correlation · ⬜ webhook and OTLP streaming · ⬜ test kit · ⬜ C2SP tiles and witness protocol | ⬜ Generated Go, Java and .NET clients · ⬜ Kafka · ⬜ read-only viewer · ⬜ OpenLineage and W3C PROV exports |
+| APIs and tooling | ✅ tenbrid REST and gRPC · ✅ action schemas · ⬜ OpenTelemetry correlation · ⬜ webhook and OTLP streaming · ⬜ test kit · ⬜ C2SP tiles and witness protocol | ⬜ Generated Go, Java and .NET clients · ⬜ Kafka · ⬜ read-only viewer · ⬜ OpenLineage and W3C PROV exports |
 
 ## Non-goals
 
