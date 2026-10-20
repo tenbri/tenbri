@@ -1,0 +1,31 @@
+# Dependabot pull requests: patch and minor updates get auto-merge, so they merge themselves once a
+# code owner approves and the required checks pass; major updates get a comment and wait. Nothing on
+# main is loosened: a maintainer still approves every change (CODEOWNERS, the main ruleset).
+name: Dependabot
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.html_url }}
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v2
+      - if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --squash "$PR"
+      - if: steps.meta.outputs.update-type == 'version-update:semver-major'
+        env:
+          DEPS: ${{ steps.meta.outputs.dependency-names }}
+        run: |
+          gh pr comment "$PR" --body "Major update of $DEPS: auto-merge is off. Read the changelog, then approve and merge by hand."
