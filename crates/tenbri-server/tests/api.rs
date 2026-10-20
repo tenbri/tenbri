@@ -74,6 +74,7 @@ async fn start(dir: &Path, extra: &str) -> Server {
         r#"
 keys = "keys"
 schema = "tenbri.toml"
+index_dir = "index"
 {extra}
 [streams.support]
 path = "audit/support"
@@ -181,6 +182,13 @@ async fn q(s: &Server, query: &str) -> Value {
     .await;
     assert_eq!(st, StatusCode::OK, "{query}: {v}");
     v
+}
+
+fn stream_id_of(entry_json: &str) -> String {
+    serde_json::from_str::<Value>(entry_json).unwrap()["stream"]
+        .as_str()
+        .unwrap()
+        .to_owned()
 }
 
 fn code(v: &Value) -> &str {
@@ -347,6 +355,38 @@ async fn rest_round_trip() {
     let rest = q(&s, &format!("action=reply_ticket&after_seq={next}")).await;
     assert_eq!(seqs(&rest).len(), 2);
     assert!(rest.get("next_after_seq").is_none());
+    assert_eq!(seqs(&q(&s, "rule=refund-limit@3").await).len(), 1);
+    assert_eq!(seqs(&q(&s, "rule=refund-limit").await).len(), 1);
+    assert_eq!(seqs(&q(&s, "input=policy:refund").await).len(), 2);
+    assert_eq!(seqs(&q(&s, "status=error").await).len(), 1);
+    assert_eq!(seqs(&q(&s, "status=ok&subject=subj:42").await), [seq + 1]);
+    assert_eq!(
+        seqs(&q(&s, "trace_id=0af7651916cd43dd8448eb211c80319c").await).len(),
+        0
+    );
+    let all = q(&s, "since=1h&limit=1000").await;
+    assert_eq!(seqs(&q(&s, "until=1h").await).len(), 0);
+    assert_eq!(seqs(&all).len() as u64, entries(&s).await);
+    // Every result carries its seq and entry hash; the page, what the index is current to.
+    let first = &all["entries"][0];
+    let line = serde_json::to_string(&first["entry"]).unwrap();
+    assert_eq!(first["seq"], first["entry"]["seq"]);
+    assert_eq!(
+        first["hash"].as_str().unwrap(),
+        tenbri_core::sign::entry_hash(line.as_bytes())
+    );
+    assert_eq!(all["as_of"]["stream"], e["stream"]);
+    assert_eq!(all["as_of"]["seq"].as_u64().unwrap(), entries(&s).await);
+    let (st, v) = get(
+        &s,
+        "/v1/streams/support/entries?since=yesterday",
+        Some(AGENT),
+    )
+    .await;
+    assert_eq!(
+        (st, code(&v)),
+        (StatusCode::BAD_REQUEST, "TENBRI_INVALID_REQUEST")
+    );
 
     let (st, v) = get(&s, "/v1/schemas", Some(AGENT)).await;
     assert_eq!(st, StatusCode::OK);
@@ -360,9 +400,25 @@ async fn rest_round_trip() {
 
     // Restarted, tenbrid still knows every key it acknowledged.
     s.stop().await;
+    // A query index that claims to be current but holds other entries is noticed and rebuilt.
+    let ixdir = tenbri_index::dir_for(&dir.join("index"), stream_id);
+    {
+        let mut ix = tenbri_index::find(&ixdir).unwrap().unwrap();
+        let st = ix.state().unwrap().unwrap();
+        ix.clear().unwrap();
+        let bogus = tenbri_index::Row {
+            seq: 1,
+            hash: "sha256:bogus".into(),
+            action: Some("reply_ticket".into()),
+            line: "{}".into(),
+            ..Default::default()
+        };
+        ix.append(&[bogus], &st).unwrap();
+    }
     let s = start(&dir, "").await;
     let (st, v) = post(&s, intents, Some(AGENT), Some(&k), &body).await;
     assert_eq!((st, &v["entry"]), (StatusCode::OK, e));
+    assert_eq!(seqs(&q(&s, "subject=subj:42").await), [seq, seq + 1]);
     s.stop().await;
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -772,6 +828,39 @@ async fn grpc_round_trip() {
         .into_inner();
     assert_eq!(q.entries.len(), 1);
     assert_eq!(q.next_after_seq, 0);
+    let (found, as_of) = (&q.entries[0], q.as_of.unwrap());
+    assert_eq!(
+        found.hash,
+        tenbri_core::sign::entry_hash(found.entry_json.as_bytes())
+    );
+    assert!(found.seq > 0 && found.seq <= as_of.seq);
+    assert_eq!(as_of.stream_id, stream_id_of(&found.entry_json));
+    let q = c
+        .query_entries(authed(
+            AGENT,
+            pb::QueryEntriesRequest {
+                stream: stream.clone(),
+                rule: "no-such-rule".into(),
+                since: "7d".into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(q.entries.is_empty());
+    let err = c
+        .query_entries(authed(
+            AGENT,
+            pb::QueryEntriesRequest {
+                stream: stream.clone(),
+                until: "soon".into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(tenbri_code(&err), "TENBRI_INVALID_REQUEST");
     let q = c
         .query_entries(authed(
             AGENT,
