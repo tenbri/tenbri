@@ -9,6 +9,10 @@
 <p align="center">
   <a href="https://scorecard.dev/viewer/?uri=github.com/tenbri/tenbri"><img src="https://api.scorecard.dev/projects/github.com/tenbri/tenbri/badge" alt="OpenSSF Scorecard"></a>
   <a href="https://github.com/tenbri/tenbri/actions/workflows/ci.yml"><img src="https://github.com/tenbri/tenbri/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/tenbri"><img src="https://img.shields.io/crates/v/tenbri" alt="crates.io"></a>
+  <a href="https://pypi.org/project/tenbri/"><img src="https://img.shields.io/pypi/v/tenbri?include_prereleases" alt="PyPI"></a>
+  <a href="https://www.npmjs.com/package/tenbri"><img src="https://img.shields.io/npm/v/tenbri/next" alt="npm"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
 </p>
 
 Tenbri is an open-source, tamper-evident record of what AI agents decided: who acted, under which
@@ -16,6 +20,21 @@ rule and policy version, from which inputs, and who approved. It is written in R
 on a local disk or an object store, and verifies offline against a trust root the verifier controls.
 It works on its own, with any agent framework, from Rust, Python, Node, the browser (WASM), the
 `tenbri` CLI or the `tenbrid` REST and gRPC API.
+
+## Quickstart
+
+```bash
+cargo install tenbri-cli --version ^0.1.0-beta.1
+tenbri init ./audit/support
+echo '{"kind":"decision","phase":"intent","source":"sdk","principal":{"kind":"agent","id":"support-bot"},"action":{"type":"reply_ticket","target":"zendesk:ticket/1042"}}' | tenbri append ./audit/support
+tenbri query ./audit/support
+tenbri show ./audit/support 3
+tenbri verify ./audit/support
+```
+
+`init` pins the stream's key on this machine, so `verify` checks against it; anyone else passes
+`--key` with the fingerprint `init` printed. Set `TENBRI_STREAM=./audit/support` to leave the path
+out, and see `tenbri append --help` for the entry format.
 
 ## The problem
 
