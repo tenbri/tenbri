@@ -165,7 +165,10 @@ mod tests {
         let c = Config::parse(FILE, Path::new("/etc/tenbri"), |_| None).unwrap();
         assert_eq!(c.listen, listen());
         assert_eq!(c.keys.unwrap(), Path::new("/etc/tenbri/keys"));
-        assert_eq!(c.streams["support"].path, "/etc/tenbri/audit/support");
+        assert_eq!(
+            Path::new(&c.streams["support"].path),
+            Path::new("/etc/tenbri/audit/support")
+        );
         let s3 = FILE.replace("audit/support", "s3://bucket/audit");
         let c = Config::parse(&s3, Path::new("/etc/tenbri"), |_| None).unwrap();
         assert_eq!(c.streams["support"].path, "s3://bucket/audit");
