@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.0-beta.2](https://github.com/tenbri/tenbri/compare/v0.1.0-beta.1...v0.1.0-beta.2) (2026-10-20)
+
+
+### Features
+
+* init(), [@decision](https://github.com/decision) and one-line framework instrumentation ([#48](https://github.com/tenbri/tenbri/issues/48)) ([82a3297](https://github.com/tenbri/tenbri/commit/82a3297db873b4b2f4e355a5fcf694af71d4f1e6))
+
+
+### Fixes
+
+* **index:** queries refuse answers from a batch edited on disk ([#47](https://github.com/tenbri/tenbri/issues/47)) ([fd25b02](https://github.com/tenbri/tenbri/commit/fd25b02d369c8afdf582d893b1e4f8beaa746dc4))
+
 ## [0.1.0-beta.1](https://github.com/tenbri/tenbri/compare/v0.1.0-alpha.2...v0.1.0-beta.1) (2026-10-20)
 
 
