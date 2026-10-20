@@ -68,3 +68,28 @@ jobs:
     with:
       tag: ${{ inputs.tag || needs.release-please.outputs.tag }}
     secrets: inherit
+
+  # PyPI's trusted publishing matches the workflow that runs the upload and refuses one made from a
+  # called workflow (docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github),
+  # so release.yml builds the wheels and the sdist, and this job uploads them from this file.
+  pypi:
+    needs: publish
+    if: always() && needs.publish.result != 'skipped' && needs.publish.result != 'cancelled' && needs.publish.outputs.pypi == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+      # With no PYPI_API_TOKEN, the action uses the trusted publisher. A version PyPI already has
+      # is skipped, so a failed run can be repeated.
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
