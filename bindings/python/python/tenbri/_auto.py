@@ -246,7 +246,8 @@ def _pins(log: Tenbri | AsyncTenbri, pins: Iterable[Pin], subject: str | None) -
 def trace() -> dict[str, str] | None:
     """The active OpenTelemetry span, when OpenTelemetry is installed and tracing."""
     try:
-        from opentelemetry import trace as otel
+        # Optional, and untyped here: mypy checks this package with or without it installed.
+        otel: Any = importlib.import_module("opentelemetry.trace")
     except ImportError:
         return None
     c = otel.get_current_span().get_span_context()
