@@ -23,6 +23,7 @@ tenbri-writer.workspace = true
 
 [dev-dependencies]
 proptest = "1"
+tenbri-crypt.workspace = true
 tenbri-keys.workspace = true
 tokio = { version = "1", features = ["macros", "rt"] }
 

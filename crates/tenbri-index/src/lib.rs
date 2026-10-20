@@ -10,6 +10,8 @@
 //!   refuses a stream that no longer extends what the index holds (a rewrite, a truncation, a
 //!   different stream) instead of mixing the two.
 //! - [`rebuild`] empties the index and reads the stream again from seq 1.
+//! - [`Backend::erase`] removes a subject's rows (`tenbri erase`); [`append`], which both of the
+//!   above write through, keeps them out once the stream records the erasure.
 //! - [`search`] answers a [`Filter`] a page at a time; every [`Hit`] carries the seq and entry
 //!   hash it can be checked by against the chain, and the [`Page`] says what the index is current
 //!   to.
@@ -212,14 +214,45 @@ pub struct Page {
 pub trait Backend: Send {
     /// What the index is current to; `None` when it is empty.
     fn state(&self) -> io::Result<Option<State>>;
-    /// Adds `rows` (consecutive, after the current state) and moves the state to `state`.
+    /// Adds `rows` (in sequence order, after the current state) and moves the state to `state`.
+    /// Callers that index a stream go through [`append`], which applies its erasure notes.
     fn append(&mut self, rows: &[Row], state: &State) -> io::Result<()>;
+    /// Deletes every row of `subject`, leaving the state as it is.
+    fn erase(&mut self, subject: &str) -> io::Result<()>;
     /// Up to `limit` matching hits, in sequence order.
     fn query(&self, f: &Filter, limit: usize) -> io::Result<Vec<Hit>>;
     /// Removes every row and the state.
     fn clear(&mut self) -> io::Result<()>;
     /// Which backend this is.
     fn kind(&self) -> Kind;
+}
+
+/// The action type of the note `tenbri erase` writes (`tenbri_crypt::erasure_note`).
+const ERASE: &str = "tenbri.erase";
+
+/// [`Backend::append`], after applying the erasure notes among `rows`: each erases its subject's
+/// rows before it, here and already in `ix`, and is kept itself without a subject, so that
+/// `--action tenbri.erase` lists erasures and `--subject` finds nothing. A subject's rows after
+/// its erasure are indexed again.
+pub fn append(ix: &mut dyn Backend, rows: Vec<Row>, state: &State) -> io::Result<()> {
+    let mut out: Vec<Row> = Vec::with_capacity(rows.len());
+    let mut erased = vec![];
+    for mut row in rows {
+        if row.kind == "note" && row.action.as_deref() == Some(ERASE) {
+            if let Some(s) = row.subject.take() {
+                // ponytail: rescans the batch per note; notes are rare.
+                out.retain(|r| r.subject.as_ref() != Some(&s));
+                erased.push(s);
+            }
+        }
+        out.push(row);
+    }
+    // Before the append, so that rows after the note survive. A crash in between leaves the old
+    // state, and the next update erases again.
+    for s in &erased {
+        ix.erase(s)?;
+    }
+    ix.append(&out, state)
 }
 
 /// A page of at most `limit` hits.
@@ -444,8 +477,7 @@ fn flush(
         ),
         checkpoint: checkpoint.or(old.and_then(|s| s.checkpoint)),
     };
-    ix.append(rows, &state)?;
-    rows.clear();
+    append(ix, std::mem::take(rows), &state)?;
     Ok(state)
 }
 

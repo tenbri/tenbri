@@ -262,6 +262,31 @@ impl Backend for SqliteIndex {
         rows.collect::<Result<_, _>>().map_err(err)
     }
 
+    fn erase(&mut self, subject: &str) -> io::Result<()> {
+        // Freed pages are zeroed, and the WAL is emptied after, so the rows do not linger in the
+        // file; copies on copy-on-write disks, snapshots or backups may survive.
+        self.0
+            .pragma_update(None, "secure_delete", true)
+            .map_err(err)?;
+        let tx = self.0.transaction().map_err(err)?;
+        for table in ["inputs", "lines"] {
+            tx.execute(
+                &format!(
+                    "DELETE FROM {table} WHERE seq IN (SELECT seq FROM entries WHERE subject = ?1)"
+                ),
+                [subject],
+            )
+            .map_err(err)?;
+        }
+        tx.execute("DELETE FROM entries WHERE subject = ?1", [subject])
+            .map_err(err)?;
+        tx.commit().map_err(err)?;
+        // A reader holding the WAL leaves it in place; the next checkpoint overwrites it.
+        self.0
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
+            .map_err(err)
+    }
+
     fn clear(&mut self) -> io::Result<()> {
         self.0
             .execute_batch(
