@@ -1,0 +1,141 @@
+{
+  "blobs": {
+    "invalid": [
+      {
+        "address": "blob:ct-sha256:f320939905937b02e211d468651c870e473257960f2ab54691af38bd1ec3c136",
+        "blob": "0ec382b2a135656f581910babcd309da3951673567cf52acef6ee4f8c6e41c34625210d8eb0aff710bc81ed861b21d84c72b315a1a06af1e595f682919aa9b6d3cb60243c805711715e05c1f535589fcd035e82e1ef3687e",
+        "data_key": "c603c3ecb6fc514edad219277dde1b7a138ce0c7ecaba4081d427d23ce2142e0",
+        "error": "not_opened",
+        "stream": "tnb1:99d13d75b5db3419a949fb723555cd43",
+        "why": "another subject's key"
+      },
+      {
+        "address": "blob:ct-sha256:f320939905937b02e211d468651c870e473257960f2ab54691af38bd1ec3c136",
+        "blob": "0ec382b2a135656f581910babcd309da3951673567cf52acef6ee4f8c6e41c34625210d8eb0aff710bc81ed861b21d84c72b315a1a06af1e595f682919aa9b6d3cb60243c805711715e05c1f535589fcd035e82e1ef3687e",
+        "data_key": "cef745fd321a2f91f62973ece5db171b4be2c4adec608f5db44ac17766565e4a",
+        "error": "not_opened",
+        "stream": "tnb1:00000000000000000000000000000000",
+        "why": "sealed for another stream"
+      },
+      {
+        "address": "blob:ct-sha256:2ced333d5106d4cc6c0573fa28449275254a43b5961e2361c56186f059031cd5",
+        "blob": "0ec382b2a135656f581910babcd309da3951673567cf52acef6ee4f9c6e41c34625210d8eb0aff710bc81ed861b21d84c72b315a1a06af1e595f682919aa9b6d3cb60243c805711715e05c1f535589fcd035e82e1ef3687e",
+        "data_key": "cef745fd321a2f91f62973ece5db171b4be2c4adec608f5db44ac17766565e4a",
+        "error": "not_opened",
+        "stream": "tnb1:99d13d75b5db3419a949fb723555cd43",
+        "why": "a ciphertext byte changed, address recomputed"
+      },
+      {
+        "address": "blob:ct-sha256:f320939905937b02e211d468651c870e473257960f2ab54691af38bd1ec3c136",
+        "blob": "0ec382b2a135656f581910babcd309da3951673567cf52acef6ee4f9c6e41c34625210d8eb0aff710bc81ed861b21d84c72b315a1a06af1e595f682919aa9b6d3cb60243c805711715e05c1f535589fcd035e82e1ef3687e",
+        "data_key": "cef745fd321a2f91f62973ece5db171b4be2c4adec608f5db44ac17766565e4a",
+        "error": "address_mismatch",
+        "stream": "tnb1:99d13d75b5db3419a949fb723555cd43",
+        "why": "a ciphertext byte changed, address kept"
+      },
+      {
+        "address": "blob:ct-sha256:e24ae83c2dca38f26bb3be5c6257a7f47c5b9fbaa7f76318af5a4a39cf19068c",
+        "blob": "0ec382b2a135656f5819",
+        "data_key": "cef745fd321a2f91f62973ece5db171b4be2c4adec608f5db44ac17766565e4a",
+        "error": "not_opened",
+        "stream": "tnb1:99d13d75b5db3419a949fb723555cd43",
+        "why": "shorter than a nonce"
+      }
+    ],
+    "valid": [
+      {
+        "address": "blob:ct-sha256:f320939905937b02e211d468651c870e473257960f2ab54691af38bd1ec3c136",
+        "blob": "0ec382b2a135656f581910babcd309da3951673567cf52acef6ee4f8c6e41c34625210d8eb0aff710bc81ed861b21d84c72b315a1a06af1e595f682919aa9b6d3cb60243c805711715e05c1f535589fcd035e82e1ef3687e",
+        "data_key": "cef745fd321a2f91f62973ece5db171b4be2c4adec608f5db44ac17766565e4a",
+        "nonce": "0ec382b2a135656f581910babcd309da3951673567cf52ac",
+        "path": "blobs/ct-sha256/f3/20939905937b02e211d468651c870e473257960f2ab54691af38bd1ec3c136",
+        "plaintext": "Refund of 40 EUR approved under policy:refund@14",
+        "stream": "tnb1:99d13d75b5db3419a949fb723555cd43"
+      },
+      {
+        "address": "blob:ct-sha256:1ccc8ada4f2519794a35f2f1e6edec191e21ffd8dc9bf9ade26f464510c17fbd",
+        "blob": "6302326a518f416bcc355b0fec411ca62afe2b82bd0c26889aaff5f06617c20c36c0f9d43e30c1dd",
+        "data_key": "cef745fd321a2f91f62973ece5db171b4be2c4adec608f5db44ac17766565e4a",
+        "nonce": "6302326a518f416bcc355b0fec411ca62afe2b82bd0c2688",
+        "path": "blobs/ct-sha256/1c/cc8ada4f2519794a35f2f1e6edec191e21ffd8dc9bf9ade26f464510c17fbd",
+        "plaintext": "",
+        "stream": "tnb1:99d13d75b5db3419a949fb723555cd43"
+      }
+    ]
+  },
+  "derivation": [
+    {
+      "blob_key": "85fd66a76f4c82c5f3c333eb72200a258b8a1f1ee8772f48f3bd88adb2295785",
+      "data_key": "cef745fd321a2f91f62973ece5db171b4be2c4adec608f5db44ac17766565e4a",
+      "digest_key": "67828ed38df1f76de6af5603f3f5deab1fc956505d852c358f13e5f03b4aea7a"
+    },
+    {
+      "blob_key": "8e548fc0cfb9a94ccde37c6c927370c9aed4ea0929c5da2a6b850cab99345f50",
+      "data_key": "c603c3ecb6fc514edad219277dde1b7a138ce0c7ecaba4081d427d23ce2142e0",
+      "digest_key": "f5a754de00cf958b5067588576ea5e666df23239dcb1d825a4d112d7eea299f4"
+    },
+    {
+      "blob_key": "4bf94ff81e3332c84a85c3011fb872875ed30aee53794dd52bda2c71bf13a949",
+      "data_key": "398c12e21888956e6791ba73b9258d9aecf2e8257fc6d313719a1727643437fc",
+      "digest_key": "bac30ac63218f72f0cdc3cdbb82baa56dba66052d459ca8bdcbda0b8f2a49c27"
+    }
+  ],
+  "digests": [
+    {
+      "content": "ticket 4821: please refund my order",
+      "data_key": "cef745fd321a2f91f62973ece5db171b4be2c4adec608f5db44ac17766565e4a",
+      "digest": "hmac-sha256:bc855e3253f599cceb61d081181b8dd8f519132e7c4115c94fa9d11d5928c2cc"
+    },
+    {
+      "content": "",
+      "data_key": "cef745fd321a2f91f62973ece5db171b4be2c4adec608f5db44ac17766565e4a",
+      "digest": "hmac-sha256:8d8b773384fdaf4a6d72d427ab56f7f7cfbf725f557062a59dc7d3be3f55623e"
+    },
+    {
+      "content": "jane@example.com",
+      "data_key": "cef745fd321a2f91f62973ece5db171b4be2c4adec608f5db44ac17766565e4a",
+      "digest": "hmac-sha256:37db4df46ec8b9996492d8b768ae58b450c2faf7acbe4b3d4a7fa44f149403b5"
+    }
+  ],
+  "erased": {
+    "blobs": {
+      "blob:ct-sha256:5eb8757cc02c1f972e89728bdc6b2fa589aee0d3fe3578852bd2702feb2d784f": "840fd158d50c2edea3a01450f9ebf62908a1178fc14125b66963938d8ba6c8ae18e491ee15ec709de4b52bdae54eb1fdef7b00037bff2e9b2b82bbb20e8f721668",
+      "blob:ct-sha256:74db3965ce72858f3ef528786dab91a8eb0db89a9c89190bdabb1974e20ccc9d": "940b022dd72d7b3b4e5e108970a1583d179d929c4214e24a2aa207054219b7530a4923c0f079bb6518f1b9dc7b4aa280df79b37f79d660a9b6f51ea551dcd656"
+    },
+    "bodies": {
+      "blob:ct-sha256:5eb8757cc02c1f972e89728bdc6b2fa589aee0d3fe3578852bd2702feb2d784f": null,
+      "blob:ct-sha256:74db3965ce72858f3ef528786dab91a8eb0db89a9c89190bdabb1974e20ccc9d": "Address change confirmed"
+    },
+    "erased": [
+      "cust_42"
+    ],
+    "inputs": [
+      {
+        "confirmable": false,
+        "content": "ticket 4821 from jane@example.com",
+        "digest": "hmac-sha256:f7c08b6e72aecd66d0b1295dc32de18a72df8e9b4ec723e8fa4ab3b918830922",
+        "subject": "cust_42"
+      },
+      {
+        "confirmable": true,
+        "content": "ticket 4822 from sam@example.com",
+        "digest": "hmac-sha256:31bf0b05277ec7fbaa459b7674b61a0e62eb486533697707aa0d918481e9f507",
+        "subject": "cust_7"
+      }
+    ],
+    "keys": {
+      "cust_7": "c603c3ecb6fc514edad219277dde1b7a138ce0c7ecaba4081d427d23ce2142e0"
+    },
+    "lines": [
+      "{\"id\":\"01M4XBGYZP0000000000000001\",\"key\":{\"id\":\"stream:p\",\"op\":\"certify\",\"pub\":\"ed25519:32a143dadd701b7aaa8554330129dbe2963f1f2fdbb7c1c30eef1c432f867cad\",\"role\":\"stream\"},\"kind\":\"key\",\"seq\":1,\"sig\":\"ed25519:040697779b79ce44cee69cd0a5fc7b8e95b7881d809ed55e4333feeb77fc0598c4ba618d58144a49d700be001a602f6444c0df4b06329fc15b1e704ea3208601\",\"signer\":\"stream:p\",\"stream\":\"tnb1:99d13d75b5db3419a949fb723555cd43\",\"ts\":\"2026-10-14T14:02:11.318Z\",\"v\":1}",
+      "{\"id\":\"01M4XBGZYY0000000000000002\",\"key\":{\"id\":\"sess:p1\",\"not_after\":\"2026-10-15T14:02:11.318Z\",\"op\":\"certify\",\"pub\":\"ed25519:c4a5352026b4079d6cefe62c2f6a4dd33a34f236bf2c0efe95900f6e78f8f0f8\",\"role\":\"session\"},\"kind\":\"key\",\"prev\":\"sha256:c13ba4d1818ade814ace8f1b92f6a73be0ac9e640a692ceb083c459a880bdf56\",\"seq\":2,\"sig\":\"ed25519:bf9282d4d20e13a8c63630148b3431fcbf9bc03053f0b57d06f7b1a00a423d01fe81475a4d32f9ac9df7ff0f87ed7dab5e43ab79de370264ab8d124beb237708\",\"signer\":\"stream:p\",\"stream\":\"tnb1:99d13d75b5db3419a949fb723555cd43\",\"ts\":\"2026-10-14T14:02:12.318Z\",\"v\":1}",
+      "{\"action\":{\"target\":\"zendesk:ticket/4811\",\"type\":\"reply_ticket\"},\"body\":\"blob:ct-sha256:5eb8757cc02c1f972e89728bdc6b2fa589aee0d3fe3578852bd2702feb2d784f\",\"id\":\"01M4XBH0Y60000000000000003\",\"inputs\":[{\"digest\":\"hmac-sha256:f7c08b6e72aecd66d0b1295dc32de18a72df8e9b4ec723e8fa4ab3b918830922\",\"ref\":\"ticket:4811\",\"version\":\"1\"}],\"kind\":\"decision\",\"phase\":\"intent\",\"prev\":\"sha256:6975f4c0c9df95332f8e60edd7ee9712cd1fa77e1f160cf614df26f118970293\",\"principal\":{\"id\":\"support-assistant\",\"kind\":\"agent\"},\"seq\":3,\"sig\":\"ed25519:c0e1c3a2c3142db31fdcc1c9c85161f646f92fd8b2afa5205a739448f2c881316e158530580e68848707f601e24aaeca4f495dd98ac6438b44af4611fa183e02\",\"signer\":\"sess:p1\",\"source\":\"sdk\",\"stream\":\"tnb1:99d13d75b5db3419a949fb723555cd43\",\"subject\":\"cust_42\",\"ts\":\"2026-10-14T14:02:13.318Z\",\"v\":1}",
+      "{\"action\":{\"target\":\"zendesk:ticket/4812\",\"type\":\"reply_ticket\"},\"body\":\"blob:ct-sha256:74db3965ce72858f3ef528786dab91a8eb0db89a9c89190bdabb1974e20ccc9d\",\"id\":\"01M4XBH1XE0000000000000004\",\"inputs\":[{\"digest\":\"hmac-sha256:31bf0b05277ec7fbaa459b7674b61a0e62eb486533697707aa0d918481e9f507\",\"ref\":\"ticket:4812\",\"version\":\"1\"}],\"kind\":\"decision\",\"phase\":\"intent\",\"prev\":\"sha256:1ef72aecddc9b1f466d68ad55ce935207b4d40f4b2ac7b50085f5a216b56ae06\",\"principal\":{\"id\":\"support-assistant\",\"kind\":\"agent\"},\"seq\":4,\"sig\":\"ed25519:e8f805dd4e86524ac85df8c28d7f3458073429db60c311559bbffd27b22c6cf68593767f7dc4eb9a3c7b33b2da0109ff63e62d8c4445299c438858a5aeb0600f\",\"signer\":\"sess:p1\",\"source\":\"sdk\",\"stream\":\"tnb1:99d13d75b5db3419a949fb723555cd43\",\"subject\":\"cust_7\",\"ts\":\"2026-10-14T14:02:14.318Z\",\"v\":1}",
+      "{\"action\":{\"target\":\"dsr:2026-1042\",\"type\":\"tenbri.erase\"},\"id\":\"01M4XBH2WP0000000000000005\",\"kind\":\"note\",\"prev\":\"sha256:f4fa679adaaec05571c9eaae9a803ad0dc69fdb32bd808302694b1f598a590dc\",\"principal\":{\"id\":\"dpo@example.com\",\"kind\":\"person\"},\"seq\":5,\"sig\":\"ed25519:fe9206ea14871a19cfa998a90db4a32907b176003e439277063a297f5f0c1592e8918713edf99410ae86aa570f92b43a7faa7114043ddf154d438a957a39b302\",\"signer\":\"sess:p1\",\"stream\":\"tnb1:99d13d75b5db3419a949fb723555cd43\",\"subject\":\"cust_42\",\"ts\":\"2026-10-14T14:02:15.318Z\",\"v\":1}"
+    ],
+    "pin": "sha256:99d13d75b5db3419a949fb723555cd433145622cd6e16cb221c0dbe0a9d89af2",
+    "result": {
+      "ok": 5
+    }
+  }
+}

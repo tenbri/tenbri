@@ -13,6 +13,8 @@ with no Tenbri binary at all.
   links land in later pre-releases.
 - [checkpoints.md](checkpoints.md): the RFC 6962 Merkle tree over entry hashes, inclusion and
   consistency proofs, checkpoints as C2SP signed notes, and verifying a stream against one.
+- [privacy.md](privacy.md): encrypted body blobs, keyed input digests, data keys and their epochs,
+  erasure, and the local key store.
 - [vectors/](vectors/README.md): the conformance test vectors.
 
 ## Versioning

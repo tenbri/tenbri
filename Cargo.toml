@@ -17,6 +17,7 @@ homepage = "https://github.com/tenbri/tenbri"
 # [workspace.package] (release-please-config.json); crates.io needs them to publish.
 [workspace.dependencies]
 tenbri-core = { path = "crates/tenbri-core", version = "0.1.0-alpha.2" }
+tenbri-crypt = { path = "crates/tenbri-crypt", version = "0.1.0-alpha.2" }
 tenbri-keys = { path = "crates/tenbri-keys", version = "0.1.0-alpha.2" }
 tenbri-merkle = { path = "crates/tenbri-merkle", version = "0.1.0-alpha.2" }
 tenbri-schema = { path = "crates/tenbri-schema", version = "0.1.0-alpha.2" }

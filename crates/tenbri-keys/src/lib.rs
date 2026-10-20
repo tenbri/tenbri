@@ -220,6 +220,11 @@ impl KeyStore {
         &self.dir
     }
 
+    /// The stream id these keys belong to.
+    pub fn stream(&self) -> &str {
+        &self.stream
+    }
+
     /// Stores `key`; refuses to replace a key already stored under the same name.
     pub fn save(&self, key: &Key, backend: Backend) -> io::Result<()> {
         let name = short(&key.signing);
