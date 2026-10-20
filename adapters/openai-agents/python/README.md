@@ -4,6 +4,10 @@
 every tool call, handoff and approval of an agent becomes a signed, chained decision that anyone
 holding the stream's key fingerprint can verify offline.
 
+```sh
+pip install --pre tenbri-openai-agents
+```
+
 ```python
 from agents import Runner
 from tenbri import AsyncTenbri
