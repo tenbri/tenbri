@@ -23,6 +23,7 @@ serde_json = { version = "1", features = ["raw_value"] }
 serde_urlencoded = "0.7"
 sha2 = "0.11"
 tenbri-core.workspace = true
+tenbri-index.workspace = true
 tenbri-otlp.workspace = true
 tenbri-keys.workspace = true
 tenbri-schema.workspace = true
@@ -40,6 +41,7 @@ utoipa = { version = "5", features = ["yaml"] }
 # tests/contract.rs: src/proto.rs is generated from contract/proto and checked against it.
 protox = "0.9"
 tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
+tenbri-index.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
 tonic = { version = "0.14", default-features = false, features = ["channel"] }
 

@@ -98,7 +98,8 @@ message GetEntryResponse {
 
 message QueryEntriesRequest {
   string stream = 1;
-  // Inputs the entry used, as ref@version (policy:refund@14); all must match.
+  // Inputs the entry used, as ref@version (policy:refund@14), or ref for any version; all must
+  // match.
   repeated string inputs = 2;
   // The action type (reply_ticket).
   string action = 3;
@@ -112,12 +113,36 @@ message QueryEntriesRequest {
   uint64 after_seq = 7;
   // At most this many entries; 0 means 100, and more than 1000 is 1000.
   uint32 limit = 8;
+  // The rule, as ref@version, or ref for any version.
+  string rule = 9;
+  // Entries at or after this time: 2026-10-20T09:00:00.000Z, 2026-10-20T09:00:00Z, 2026-10-20, or
+  // a duration ago (90s, 15m, 1h, 7d). ts is the writer's claimed time.
+  string since = 10;
+  // Entries before this time, in the same forms as since.
+  string until = 11;
+  // The OpenTelemetry trace id (32 hex digits).
+  string trace_id = 12;
+  // An outcome's status: ok, error, refused or unknown.
+  string status = 13;
 }
 
 message QueryEntriesResponse {
   repeated QueriedEntry entries = 1;
   // When more entries match: pass it as `after_seq` for the next page. Otherwise 0.
   uint64 next_after_seq = 2;
+  // What the stream's index had read when it answered.
+  AsOf as_of = 3;
+}
+
+message AsOf {
+  // The stream id (tnb1:...).
+  string stream_id = 1;
+  // The last sequence number indexed.
+  uint64 seq = 2;
+  // The entry hash at `seq`.
+  string hash = 3;
+  // The size of the stream's latest checkpoint at or below `seq`; 0 if it has none.
+  uint64 checkpoint = 4;
 }
 
 message TailEntriesRequest {
@@ -133,6 +158,10 @@ message QueriedEntry {
   // The entry's canonical JSON.
   string entry_json = 1;
   Verification verification = 2;
+  // Its sequence number.
+  uint64 seq = 3;
+  // Its entry hash (sha256:...), to check against the chain, a checkpoint or a receipt.
+  string hash = 4;
 }
 
 enum Verification {

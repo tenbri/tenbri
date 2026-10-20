@@ -110,6 +110,8 @@ fn queried((s, v): (Arc<Stored>, Verification)) -> pb::QueriedEntry {
             Verification::Verified => pb::Verification::Verified,
             Verification::Broken => pb::Verification::Broken,
         } as i32,
+        seq: s.entry.seq,
+        hash: s.hash.clone(),
     }
 }
 
@@ -208,33 +210,48 @@ impl TenbriService for Grpc {
         let t = self.caller(r.metadata())?;
         let q = r.into_inner();
         let some = |s: String| (!s.is_empty()).then_some(s);
-        let inputs = q
-            .inputs
-            .iter()
-            .map(|i| {
-                i.rsplit_once('@')
-                    .map(|(r, v)| (r.to_owned(), v.to_owned()))
-                    .ok_or_else(|| {
+        let time = |field: &str, v: String| {
+            some(v)
+                .map(|v| {
+                    crate::rest::time(&v).ok_or_else(|| {
                         status(ApiError::new(
                             ErrorCode::InvalidRequest,
-                            format!("input {i}: expected ref@version"),
+                            format!("{field} {v}: not a time"),
                         ))
                     })
-            })
-            .collect::<Result<_, _>>()?;
+                })
+                .transpose()
+        };
         let query = Query {
-            inputs,
-            action: some(q.action),
-            principal: some(q.principal),
-            target: some(q.target),
-            subject: some(q.subject),
-            after_seq: q.after_seq,
+            filter: tenbri_index::Filter {
+                inputs: q
+                    .inputs
+                    .iter()
+                    .map(|i| tenbri_index::ref_version(i))
+                    .collect(),
+                action: some(q.action),
+                principal: some(q.principal),
+                target: some(q.target),
+                subject: some(q.subject),
+                rule: some(q.rule).map(|r| tenbri_index::ref_version(&r)),
+                since: time("since", q.since)?,
+                until: time("until", q.until)?,
+                trace_id: some(q.trace_id),
+                status: some(q.status),
+                after: q.after_seq,
+            },
             limit: q.limit as usize,
         };
-        let (entries, next) = self.0.query(&t, &q.stream, &query).map_err(status)?;
+        let (entries, next, state) = self.0.query(&t, &q.stream, &query).await.map_err(status)?;
         Ok(Response::new(pb::QueryEntriesResponse {
             entries: entries.into_iter().map(queried).collect(),
             next_after_seq: next.unwrap_or(0),
+            as_of: Some(pb::AsOf {
+                stream_id: state.stream,
+                seq: state.seq,
+                hash: state.hash,
+                checkpoint: state.checkpoint.unwrap_or(0),
+            }),
         }))
     }
 

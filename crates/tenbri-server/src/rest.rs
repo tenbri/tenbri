@@ -59,6 +59,7 @@ TENBRI_INTERNAL (500). A 503 carries Retry-After.",
         BatchRequest,
         QueriedBody,
         QueryBody,
+        AsOfBody,
         VerifyBody,
         StatusBody,
     ))
@@ -194,6 +195,10 @@ struct QueriedBody {
     verification: VerificationBody,
     #[schema(value_type = Object)]
     entry: Box<RawValue>,
+    /// Its sequence number.
+    seq: u64,
+    /// Its entry hash (sha256:...), to check against the chain, a checkpoint or a receipt.
+    hash: String,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -211,6 +216,21 @@ struct QueryBody {
     /// When more entries match: pass it as `after_seq` for the next page.
     #[serde(skip_serializing_if = "Option::is_none")]
     next_after_seq: Option<u64>,
+    as_of: AsOfBody,
+}
+
+/// What the answer is current to: the stream's index had read up to here.
+#[derive(Serialize, ToSchema)]
+struct AsOfBody {
+    /// The stream id (tnb1:...).
+    stream: String,
+    /// The last sequence number indexed.
+    seq: u64,
+    /// The entry hash at `seq`.
+    hash: String,
+    /// The size of the stream's latest checkpoint at or below `seq`, if it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    checkpoint: Option<u64>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -240,6 +260,11 @@ struct StatusBody {
     status: String,
 }
 
+/// A `since` or `until` value, now if relative.
+pub(crate) fn time(v: &str) -> Option<String> {
+    tenbri_index::parse_time(v, tenbri_writer::now_ms())
+}
+
 fn raw(s: &Stored) -> Box<RawValue> {
     RawValue::from_string(s.line.clone()).expect("a stored line is JSON")
 }
@@ -259,6 +284,8 @@ fn queried((s, v): (Arc<Stored>, Verification)) -> QueriedBody {
             Verification::Broken => VerificationBody::Broken,
         },
         entry: raw(&s),
+        seq: s.entry.seq,
+        hash: s.hash.clone(),
     }
 }
 
@@ -421,17 +448,24 @@ async fn append_batch(
     }))
 }
 
-/// Entries matching every filter given, in sequence order.
+/// Entries matching every filter given, in sequence order, through the stream's index (SQLite or
+/// Parquet); `as_of` says what the index had read. The entries are the ones tenbrid read and
+/// verified, each with its seq and entry hash.
 #[utoipa::path(
     get,
     path = "/v1/streams/{stream}/entries",
     params(
         ("stream" = String, Path, description = "The stream's name or id"),
-        ("input" = Option<Vec<String>>, Query, description = "An input the entry used, as ref@version (policy:refund@14); repeat to require several"),
+        ("input" = Option<Vec<String>>, Query, description = "An input the entry used, as ref@version (policy:refund@14), or ref for any version; repeat to require several"),
         ("action" = Option<String>, Query, description = "The action type (reply_ticket)"),
         ("principal" = Option<String>, Query, description = "kind:id (agent:support-assistant)"),
         ("target" = Option<String>, Query, description = "The action target, exactly"),
         ("subject" = Option<String>, Query, description = "The subject handle"),
+        ("rule" = Option<String>, Query, description = "The rule, as ref@version, or ref for any version"),
+        ("since" = Option<String>, Query, description = "Entries at or after this time: 2026-10-20T09:00:00.000Z, 2026-10-20T09:00:00Z, 2026-10-20, or a duration ago (90s, 15m, 1h, 7d); ts is the writer's claimed time"),
+        ("until" = Option<String>, Query, description = "Entries before this time, in the same forms as since"),
+        ("trace_id" = Option<String>, Query, description = "The OpenTelemetry trace id (32 hex digits)"),
+        ("status" = Option<String>, Query, description = "An outcome's status: ok, error, refused or unknown"),
         ("after_seq" = Option<u64>, Query, description = "Only entries with a greater sequence number"),
         ("limit" = Option<u32>, Query, description = "At most this many entries: default 100, at most 1000"),
     ),
@@ -452,26 +486,33 @@ async fn query_entries(
     let mut query = Query::default();
     for (k, v) in pairs {
         let bad = |what: &str| ApiError::new(ErrorCode::InvalidRequest, format!("{k}={v}: {what}"));
+        let f = &mut query.filter;
         match k.as_str() {
-            "input" => {
-                let (r, ver) = v
-                    .rsplit_once('@')
-                    .ok_or_else(|| bad("expected ref@version"))?;
-                query.inputs.push((r.into(), ver.into()));
-            }
-            "action" => query.action = Some(v),
-            "principal" => query.principal = Some(v),
-            "target" => query.target = Some(v),
-            "subject" => query.subject = Some(v),
-            "after_seq" => query.after_seq = v.parse().map_err(|_| bad("not a number"))?,
+            "input" => f.inputs.push(tenbri_index::ref_version(&v)),
+            "action" => f.action = Some(v),
+            "principal" => f.principal = Some(v),
+            "target" => f.target = Some(v),
+            "subject" => f.subject = Some(v),
+            "rule" => f.rule = Some(tenbri_index::ref_version(&v)),
+            "since" => f.since = Some(time(&v).ok_or_else(|| bad("not a time"))?),
+            "until" => f.until = Some(time(&v).ok_or_else(|| bad("not a time"))?),
+            "trace_id" => f.trace_id = Some(v),
+            "status" => f.status = Some(v),
+            "after_seq" => f.after = v.parse().map_err(|_| bad("not a number"))?,
             "limit" => query.limit = v.parse().map_err(|_| bad("not a number"))?,
             _ => return Err(bad("unknown parameter")),
         }
     }
-    let (entries, next) = d.query(&t, &stream, &query)?;
+    let (entries, next, state) = d.query(&t, &stream, &query).await?;
     Ok(Json(QueryBody {
         entries: entries.into_iter().map(queried).collect(),
         next_after_seq: next,
+        as_of: AsOfBody {
+            stream: state.stream,
+            seq: state.seq,
+            hash: state.hash,
+            checkpoint: state.checkpoint,
+        },
     }))
 }
 

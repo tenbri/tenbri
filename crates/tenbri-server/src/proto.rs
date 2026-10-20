@@ -88,7 +88,8 @@ pub struct GetEntryResponse {
 pub struct QueryEntriesRequest {
     #[prost(string, tag = "1")]
     pub stream: ::prost::alloc::string::String,
-    /// Inputs the entry used, as ref@version (policy:refund@14); all must match.
+    /// Inputs the entry used, as ref@version (policy:refund@14), or ref for any version; all must
+    /// match.
     #[prost(string, repeated, tag = "2")]
     pub inputs: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// The action type (reply_ticket).
@@ -109,6 +110,22 @@ pub struct QueryEntriesRequest {
     /// At most this many entries; 0 means 100, and more than 1000 is 1000.
     #[prost(uint32, tag = "8")]
     pub limit: u32,
+    /// The rule, as ref@version, or ref for any version.
+    #[prost(string, tag = "9")]
+    pub rule: ::prost::alloc::string::String,
+    /// Entries at or after this time: 2026-10-20T09:00:00.000Z, 2026-10-20T09:00:00Z, 2026-10-20, or
+    /// a duration ago (90s, 15m, 1h, 7d). ts is the writer's claimed time.
+    #[prost(string, tag = "10")]
+    pub since: ::prost::alloc::string::String,
+    /// Entries before this time, in the same forms as since.
+    #[prost(string, tag = "11")]
+    pub until: ::prost::alloc::string::String,
+    /// The OpenTelemetry trace id (32 hex digits).
+    #[prost(string, tag = "12")]
+    pub trace_id: ::prost::alloc::string::String,
+    /// An outcome's status: ok, error, refused or unknown.
+    #[prost(string, tag = "13")]
+    pub status: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct QueryEntriesResponse {
@@ -117,6 +134,24 @@ pub struct QueryEntriesResponse {
     /// When more entries match: pass it as `after_seq` for the next page. Otherwise 0.
     #[prost(uint64, tag = "2")]
     pub next_after_seq: u64,
+    /// What the stream's index had read when it answered.
+    #[prost(message, optional, tag = "3")]
+    pub as_of: ::core::option::Option<AsOf>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AsOf {
+    /// The stream id (tnb1:...).
+    #[prost(string, tag = "1")]
+    pub stream_id: ::prost::alloc::string::String,
+    /// The last sequence number indexed.
+    #[prost(uint64, tag = "2")]
+    pub seq: u64,
+    /// The entry hash at `seq`.
+    #[prost(string, tag = "3")]
+    pub hash: ::prost::alloc::string::String,
+    /// The size of the stream's latest checkpoint at or below `seq`; 0 if it has none.
+    #[prost(uint64, tag = "4")]
+    pub checkpoint: u64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TailEntriesRequest {
@@ -137,6 +172,12 @@ pub struct QueriedEntry {
     pub entry_json: ::prost::alloc::string::String,
     #[prost(enumeration = "Verification", tag = "2")]
     pub verification: i32,
+    /// Its sequence number.
+    #[prost(uint64, tag = "3")]
+    pub seq: u64,
+    /// Its entry hash (sha256:...), to check against the chain, a checkpoint or a receipt.
+    #[prost(string, tag = "4")]
+    pub hash: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct VerifyStreamRequest {

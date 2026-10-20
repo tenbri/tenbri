@@ -3147,6 +3147,7 @@ dependencies = [
  "serde_urlencoded",
  "sha2",
  "tenbri-core",
+ "tenbri-index",
  "tenbri-keys",
  "tenbri-otlp",
  "tenbri-schema",

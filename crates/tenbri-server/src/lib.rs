@@ -68,11 +68,13 @@ pub struct Token {
     pub streams: Option<Vec<String>>,
 }
 
-/// An entry as stored, with its canonical JSON.
+/// An entry as stored, with its canonical JSON and its entry hash.
 #[derive(Debug)]
 pub struct Stored {
     pub entry: Entry,
     pub line: String,
+    /// `sha256:…`, the RFC 6962 leaf hash the chain and checkpoints use.
+    pub hash: String,
 }
 
 /// Whether an entry checks out against the stream's pinned key.
@@ -105,20 +107,19 @@ pub enum Op {
     Batch,
 }
 
-/// Filters for [`Daemon::query`]; empty ones match everything.
+/// Filters for [`Daemon::query`] (the index's filter, a cursor and a page size); empty ones
+/// match everything.
 #[derive(Clone, Debug, Default)]
 pub struct Query {
-    /// (ref, version) pairs; all must be among the entry's inputs.
-    pub inputs: Vec<(String, String)>,
-    pub action: Option<String>,
-    /// `kind:id`.
-    pub principal: Option<String>,
-    pub target: Option<String>,
-    pub subject: Option<String>,
-    pub after_seq: u64,
+    /// Its `after` is the cursor, `after_seq` in the API.
+    pub filter: tenbri_index::Filter,
     /// 0 means 100; capped at 1000.
     pub limit: usize,
 }
+
+/// A page of [`Daemon::query`]: matching entries in sequence order, the cursor of the next page
+/// if more match, and what the stream's index is current to.
+pub type Queried = (Vec<Found>, Option<u64>, tenbri_index::State);
 
 /// The result of [`Daemon::verify`].
 #[derive(Clone, Debug)]
@@ -141,12 +142,15 @@ struct Lane {
     /// Reads back what was written, checking it, to feed the index.
     reader: Mutex<Reader<'static, AnyStore>>,
     index: RwLock<Index>,
+    /// The query index (SQLite or Parquet), fed from `index` when a query comes.
+    query_index: std::sync::Mutex<Box<dyn tenbri_index::Backend>>,
     tx: broadcast::Sender<Arc<Stored>>,
     writable: AtomicBool,
 }
 
-/// ponytail: every entry in memory, by position (`seq - 1`) and id; tenbri-index (SQLite or
-/// Parquet) when streams outgrow memory.
+/// ponytail: every entry in memory, by position (`seq - 1`) and id, verified, for get, tail and
+/// idempotent replays; queries go through tenbri-index. Serve those from the store when streams
+/// outgrow memory.
 #[derive(Default)]
 struct Index {
     entries: Vec<Arc<Stored>>,
@@ -191,6 +195,11 @@ impl Daemon {
             .clone()
             .or_else(tenbri_keys::default_dir)
             .ok_or("no keys directory: set keys or TENBRI_KEYS")?;
+        let index_root = config
+            .index_dir
+            .clone()
+            .or_else(tenbri_index::default_root)
+            .ok_or("no index directory: set index_dir or TENBRI_INDEX_DIR")?;
         let mut lanes = BTreeMap::new();
         let lane_config = LaneConfig {
             queue: config.queue,
@@ -199,7 +208,7 @@ impl Daemon {
         };
         for (name, sc) in &config.streams {
             let store = stores.remove(name).ok_or("a stream without a store")?;
-            let lane = Lane::open(name, sc, store, &keys, lane_config)
+            let lane = Lane::open(name, sc, store, &keys, &index_root, lane_config)
                 .await
                 .map_err(|e| format!("stream {name} ({}): {e}", sc.path))?;
             lanes.insert(name.clone(), Arc::new(lane));
@@ -354,33 +363,47 @@ impl Daemon {
         Ok((s, v))
     }
 
-    /// Matching entries in sequence order, and the `after_seq` of the next page if there is one.
-    pub fn query(
-        &self,
-        token: &Token,
-        stream: &str,
-        q: &Query,
-    ) -> Result<(Vec<Found>, Option<u64>), ApiError> {
+    /// Matching entries in sequence order, and the `after_seq` of the next page if there is one,
+    /// through the stream's index, which first takes what was written since the last query. The
+    /// entries returned are the ones this daemon read and verified, not the index's copies.
+    pub async fn query(&self, token: &Token, stream: &str, q: &Query) -> Result<Queried, ApiError> {
         let lane = self.lane(token, stream)?;
         let limit = match q.limit {
             0 => 100,
             n => n.min(1000),
         };
+        let seq = lane.index.read().expect("index lock").entries.len() as u64;
+        let checkpoint = tenbri_index::latest_checkpoint(&lane.store, seq).await?;
+        let internal =
+            |e: std::io::Error| ApiError::new(ErrorCode::Internal, format!("index: {e}"));
+        // ponytail: SQLite and Parquet run on the async worker; spawn_blocking if large pages or
+        // Parquet scans hold it too long.
+        let mut qx = lane.query_index.lock().expect("query index lock");
         let ix = lane.index.read().expect("index lock");
-        let start = usize::try_from(q.after_seq)
-            .unwrap_or(usize::MAX)
-            .min(ix.entries.len());
-        let mut out: Vec<_> = ix.entries[start..]
-            .iter()
-            .filter(|s| q.matches(&s.entry))
-            .take(limit + 1)
-            .map(|s| (s.clone(), ix.verification(s.entry.seq)))
-            .collect();
-        let next = (out.len() > limit).then(|| {
-            out.truncate(limit);
-            out[limit - 1].0.entry.seq
-        });
-        Ok((out, next))
+        // Once more from scratch if the index disagrees with what was verified (it was changed
+        // under us, or by another process).
+        for fresh in [false, true] {
+            if fresh {
+                qx.clear().map_err(internal)?;
+            }
+            lane.feed(qx.as_mut(), &ix, checkpoint).map_err(internal)?;
+            let page = tenbri_index::search(qx.as_ref(), &q.filter, limit).map_err(internal)?;
+            let found: Option<Vec<Found>> = page
+                .hits
+                .iter()
+                .map(|h| {
+                    let s = ix.entries.get((h.seq as usize).checked_sub(1)?)?;
+                    (s.hash == h.hash).then(|| (s.clone(), ix.verification(h.seq)))
+                })
+                .collect();
+            if let (Some(found), Some(state)) = (found, page.state) {
+                return Ok((found, page.next, state));
+            }
+        }
+        Err(ApiError::new(
+            ErrorCode::Internal,
+            "the index disagrees with the stream after a rebuild",
+        ))
     }
 
     /// Entries after `after_seq`, then new ones as they are written, until shutdown. Ends with an
@@ -467,6 +490,7 @@ impl Lane {
         sc: &StreamConfig,
         store: AnyStore,
         keys: &Path,
+        index_root: &Path,
         config: LaneConfig,
     ) -> Result<Lane, String> {
         let head = store
@@ -515,6 +539,9 @@ impl Lane {
         };
         // One store per stream for the life of the process; the reader borrows it.
         let leaked: &'static AnyStore = Box::leak(Box::new(store.clone()));
+        let query_index =
+            tenbri_index::open(sc.index, &tenbri_index::dir_for(index_root, &head.stream))
+                .map_err(|e| format!("index: {e}"))?;
         let lane = Lane {
             name: name.to_owned(),
             id: head.stream,
@@ -524,10 +551,24 @@ impl Lane {
             writer: tenbri_writer::Lane::spawn(writer, config),
             reader: Mutex::new(Reader::new(leaked, Some(&pin))),
             index: RwLock::default(),
+            query_index: std::sync::Mutex::new(query_index),
             tx: broadcast::channel(TAIL_BUFFER).0,
             writable: AtomicBool::new(writable),
         };
         lane.sync().await.map_err(|e| e.to_string())?;
+        // The query index is rebuilt from the stream just read and verified: whatever the file
+        // held before (an older run's rows, or rows someone edited) is never trusted.
+        let seq = lane.index.read().expect("index lock").entries.len() as u64;
+        let checkpoint = tenbri_index::latest_checkpoint(&lane.store, seq)
+            .await
+            .map_err(|e| e.to_string())?;
+        {
+            let mut qx = lane.query_index.lock().expect("query index lock");
+            let ix = lane.index.read().expect("index lock");
+            qx.clear()
+                .and_then(|()| lane.feed(qx.as_mut(), &ix, checkpoint))
+                .map_err(|e| format!("index: {e}"))?;
+        }
         Ok(lane)
     }
 
@@ -791,7 +832,12 @@ impl Lane {
                 &canon::from_serialize(&e).expect("a stored entry"),
             ))
             .expect("canonical JSON is UTF-8");
-            let s = Arc::new(Stored { entry: e, line });
+            let hash = sign::entry_hash(line.as_bytes());
+            let s = Arc::new(Stored {
+                entry: e,
+                line,
+                hash,
+            });
             let n = ix.entries.len();
             ix.ids.insert(s.entry.id.clone(), n);
             ix.entries.push(s.clone());
@@ -802,45 +848,60 @@ impl Lane {
     }
 }
 
+impl Lane {
+    /// Brings the query index up to the entries in `ix`, starting over if it holds anything else.
+    fn feed(
+        &self,
+        qx: &mut dyn tenbri_index::Backend,
+        ix: &Index,
+        checkpoint: Option<u64>,
+    ) -> std::io::Result<()> {
+        let state = qx.state()?;
+        let mut from = state.as_ref().map_or(0, |s| s.seq as usize);
+        let agrees = |s: &tenbri_index::State| {
+            s.stream == self.id
+                && (1..=ix.entries.len()).contains(&from)
+                && ix.entries[from - 1].hash == s.hash
+        };
+        if state.as_ref().is_some_and(|s| !agrees(s)) {
+            qx.clear()?;
+            from = 0;
+        }
+        let new = &ix.entries[from..];
+        let same = state.is_some_and(|s| from > 0 && s.checkpoint == checkpoint);
+        if ix.entries.is_empty() || (new.is_empty() && same) {
+            return Ok(());
+        }
+        let mut chunks: Vec<&[Arc<Stored>]> = new.chunks(50_000).collect();
+        if chunks.is_empty() {
+            // Only the checkpoint moved.
+            chunks.push(&[]);
+        }
+        let mut seq = from;
+        for chunk in chunks {
+            seq += chunk.len();
+            let rows: Vec<tenbri_index::Row> = chunk
+                .iter()
+                .map(|s| tenbri_index::Row::new(&s.entry, &s.line))
+                .collect();
+            let state = tenbri_index::State {
+                stream: self.id.clone(),
+                seq: seq as u64,
+                hash: ix.entries[seq - 1].hash.clone(),
+                checkpoint,
+            };
+            qx.append(&rows, &state)?;
+        }
+        Ok(())
+    }
+}
+
 impl Index {
     fn verification(&self, seq: u64) -> Verification {
         match self.broken_from {
             Some(b) if seq >= b => Verification::Broken,
             _ => Verification::Verified,
         }
-    }
-}
-
-impl Query {
-    fn matches(&self, e: &Entry) -> bool {
-        let has = |(r, v): &(String, String)| {
-            e.inputs
-                .iter()
-                .flatten()
-                .any(|i| &i.r#ref == r && &i.version == v)
-        };
-        let action = e.action.as_ref();
-        self.inputs.iter().all(has)
-            && self
-                .action
-                .as_ref()
-                .is_none_or(|a| action.is_some_and(|x| &x.r#type == a))
-            && self
-                .target
-                .as_ref()
-                .is_none_or(|t| action.and_then(|x| x.target.as_ref()) == Some(t))
-            && self
-                .subject
-                .as_ref()
-                .is_none_or(|s| e.subject.as_ref() == Some(s))
-            && self.principal.as_ref().is_none_or(|p| {
-                e.principal.as_ref().is_some_and(|x| {
-                    serde_json::to_value(x.kind)
-                        .ok()
-                        .and_then(|k| k.as_str().map(str::to_owned))
-                        .is_some_and(|k| *p == format!("{k}:{}", x.id))
-                })
-            })
     }
 }
 
