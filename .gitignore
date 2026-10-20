@@ -6,3 +6,7 @@ node_modules/
 __pycache__/
 .venv/
 *.cdx.json
+/bindings/python/python/tenbri/_native.*.so
+/bindings/python/python/tenbri/_native.*.pyd
+.mypy_cache/
+.pytest_cache/

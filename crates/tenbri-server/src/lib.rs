@@ -450,7 +450,15 @@ impl Daemon {
         if !lane.index.read().expect("index lock").ids.contains_key(id) {
             return Err(ApiError::new(ErrorCode::NotFound, format!("no entry {id}")));
         }
-        Ok(tenbri_writer::receipt(&lane.store, Some(&lane.pin), |e| e.id == id).await?)
+        let make = || tenbri_writer::receipt(&lane.store, Some(&lane.pin), |e| e.id == id);
+        match make().await {
+            // No checkpoint covers it yet: seal one now rather than make the caller wait for it.
+            Err(tenbri_writer::ReceiptError::NotCheckpointed(_)) => {
+                lane.writer.seal().await;
+                Ok(make().await?)
+            }
+            r => Ok(r?),
+        }
     }
 
     /// Timestamps the latest checkpoint of every stream that has none yet with the TSA at `url`;

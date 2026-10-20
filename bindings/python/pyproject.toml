@@ -13,12 +13,16 @@ dynamic = ["version"]
 classifiers = [
   "Programming Language :: Rust",
   "Programming Language :: Python :: Implementation :: CPython",
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 4 - Beta",
+  "Framework :: AsyncIO",
+  "Typing :: Typed",
 ]
 
 [project.urls]
 Repository = "https://github.com/tenbri/tenbri"
 
 [tool.maturin]
-module-name = "tenbri"
+# The API is Python (python/tenbri); the Rust core is its tenbri._native extension.
+python-source = "python"
+module-name = "tenbri._native"
 features = ["pyo3/extension-module"]

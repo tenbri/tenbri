@@ -59,6 +59,12 @@ impl<S: Store> Hook<S> for Checkpoints {
             let _ = self.write(store, &c, key).await;
         }
     }
+
+    async fn seal(&mut self, store: &S, c: Commit<'_>) {
+        if let Some(key) = c.signer.filter(|_| c.hashes.len() as u64 > self.size) {
+            let _ = self.write(store, &c, key).await;
+        }
+    }
 }
 
 impl<S: Store> Writer<S, Checkpoints> {

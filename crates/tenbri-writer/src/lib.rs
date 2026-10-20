@@ -7,7 +7,7 @@
 //! writer between many tasks with group commit and backpressure. A [`Hook`] runs after every HEAD
 //! the writer moves; [`Checkpoints`] is the one that writes signed checkpoints, and
 //! [`Writer::with_checkpoints`] refuses a HEAD older than the latest one. [`verify`] and
-//! [`Reader`] read a stream back; [`receipt`] proves entries of it; [`gc`] removes what crashed writers left. A [`Clock`] gives
+//! [`Reader`] read a stream back; [`receipt()`] proves entries of it; [`gc`] removes what crashed writers left. A [`Clock`] gives
 //! the writer its time and entry ids (the test kit's is fixed).
 //!
 //! With the `otel` feature, every entry appended without `trace` gets the ids of the
@@ -225,6 +225,13 @@ pub struct Commit<'a> {
 /// in here. The batch is durable whatever the hook does.
 pub trait Hook<S: Store>: Send {
     fn committed(&mut self, store: &S, commit: Commit<'_>) -> impl Future<Output = ()> + Send;
+
+    /// Asked for at once, whatever is due: [`Writer::seal`] and [`Lane::seal`]. Nothing by
+    /// default; [`Checkpoints`] writes a checkpoint of the whole stream.
+    fn seal(&mut self, store: &S, commit: Commit<'_>) -> impl Future<Output = ()> + Send {
+        let _ = (store, commit);
+        async {}
+    }
 }
 
 /// No hook.
@@ -407,6 +414,21 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
             signer: signer(&self.chain, self.session.as_ref(), self.clock.now_ms()),
         };
         self.hook.committed(&self.store, commit).await;
+    }
+
+    /// Lets the hook act now, whatever is due: with [`Checkpoints`], a checkpoint of the whole
+    /// stream unless the latest one covers it.
+    pub async fn seal(&mut self) {
+        if self.stale {
+            return;
+        }
+        let commit = Commit {
+            head: &self.head,
+            first: self.head.seq + 1,
+            hashes: &self.hashes,
+            signer: signer(&self.chain, self.session.as_ref(), self.clock.now_ms()),
+        };
+        self.hook.seal(&self.store, commit).await;
     }
 
     /// Signs with session keys from `keys` from now on, renewing the session key before it

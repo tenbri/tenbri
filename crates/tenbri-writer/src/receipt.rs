@@ -12,13 +12,14 @@ use tenbri_store::Store;
 use crate::checkpoints::{anchored_size, check, size_of};
 use crate::read::{ReadError, Reader, batch_key, split_batch};
 
-/// Why [`receipt`] made none.
+/// Why [`receipt()`] made none.
 #[derive(Debug)]
 pub enum ReceiptError {
     Read(ReadError),
     /// No entry matched.
     NotFound,
-    /// No checkpoint covers the entry at this seq yet: the writer makes one within 60 seconds.
+    /// No checkpoint covers the entry at this seq yet: the writer makes one within 60 seconds,
+    /// [`crate::Writer::seal`] and [`crate::Lane::seal`] at once.
     NotCheckpointed(u64),
 }
 
@@ -29,7 +30,7 @@ impl fmt::Display for ReceiptError {
             ReceiptError::NotFound => f.write_str("no such entry"),
             ReceiptError::NotCheckpointed(seq) => write!(
                 f,
-                "no checkpoint covers seq {seq} yet; the writer makes one within 60 seconds of a write"
+                "no checkpoint covers seq {seq} yet: the writer makes one within 60 seconds of a write, `tenbri checkpoint` at once"
             ),
         }
     }

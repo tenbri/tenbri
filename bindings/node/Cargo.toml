@@ -14,12 +14,15 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = { version = "3", default-features = false, features = ["napi4"] }
+# async: async functions return Promises, run on napi-rs's Tokio runtime.
+napi = { version = "3", default-features = false, features = ["napi4", "async"] }
 napi-derive = "3"
+serde_json = "1"
+tenbri-bindings = { path = "../common" }
 
 [build-dependencies]
 napi-build = "2"
 
 # Node provides the napi symbols at load time; a test binary has no Node, so it looks them up itself.
 [dev-dependencies]
-napi = { version = "3", default-features = false, features = ["napi4", "dyn-symbols"] }
+napi = { version = "3", default-features = false, features = ["napi4", "async", "dyn-symbols"] }

@@ -68,10 +68,14 @@ async fn receipts_and_timestamps() {
         .await
         .unwrap();
     assert!(res.status().is_success());
+    // No checkpoint covers it yet: tenbrid seals one.
     let res = get(&first).await.unwrap();
-    assert_eq!(res.status().as_u16(), 503);
-    let v: Value = res.json().await.unwrap();
-    assert_eq!(v["error"]["code"], "TENBRI_NOT_CHECKPOINTED", "{v}");
+    assert_eq!(res.status().as_u16(), 200);
+    let receipt = res.bytes().await.unwrap();
+    let v = tenbri_anchor::verify_receipt(&receipt, &pin, Some(&roots)).unwrap();
+    assert_eq!(v.receipt.proved()[0].id, first);
+    assert_eq!(v.receipt.checkpoint.size, 3);
+    assert_eq!(v.timestamps.unwrap().len(), 0);
     let v: Value = get("01ARZ3NDEKTSV4RRFFQ69G5FAV")
         .await
         .unwrap()
@@ -80,29 +84,9 @@ async fn receipts_and_timestamps() {
         .unwrap();
     assert_eq!(v["error"]["code"], "TENBRI_NOT_FOUND", "{v}");
 
-    // 1,000 more entries: the writer checkpoints.
-    let notes: Vec<Value> = (0..1000)
-        .map(|_| json!({"id": new_id(now_ms()).unwrap(), "kind": "note"}))
-        .collect();
-    let res = http
-        .post(format!("http://{r}/v1/streams/support/entries"))
-        .bearer_auth(TOKEN)
-        .json(&json!({ "entries": notes }))
-        .send()
-        .await
-        .unwrap();
-    assert!(res.status().is_success());
-
-    let res = get(&first).await.unwrap();
-    assert_eq!(res.status().as_u16(), 200);
-    let receipt = res.bytes().await.unwrap();
-    let v = tenbri_anchor::verify_receipt(&receipt, &pin, Some(&roots)).unwrap();
-    assert_eq!(v.receipt.proved()[0].id, first);
-    assert_eq!(v.timestamps.unwrap().len(), 0);
-
     // What [anchor] runs every hour: the latest checkpoint gets a token, once.
     let written = daemon.anchor(&tsa_url).await;
-    assert_eq!(written, vec!["anchors/000000001003.tsr".to_owned()]);
+    assert_eq!(written, vec!["anchors/000000000003.tsr".to_owned()]);
     assert!(daemon.anchor(&tsa_url).await.is_empty());
 
     let ch = tonic::transport::Channel::from_shared(format!("http://{g}"))
@@ -119,7 +103,7 @@ async fn receipts_and_timestamps() {
         .insert("authorization", format!("Bearer {TOKEN}").parse().unwrap());
     let receipt = c.get_receipt(req).await.unwrap().into_inner().receipt;
     let v = tenbri_anchor::verify_receipt(&receipt, &pin, Some(&roots)).unwrap();
-    assert_eq!(v.receipt.checkpoint.size, 1003);
+    assert_eq!(v.receipt.checkpoint.size, 3);
     assert_eq!(v.timestamps.unwrap().len(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }

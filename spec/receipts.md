@@ -101,7 +101,8 @@ each with its inclusion proof in that checkpoint's tree, and the checkpoint's to
 The reference implementation is `tenbri receipt create <stream> --entry <seq|id>` and tenbrid's
 `GET /v1/streams/{stream}/entries/{id}/receipt` (gRPC `GetReceipt`). A receipt is only possible
 once a checkpoint covers the entry: the writer makes one within 60 seconds of a write
-(checkpoints.md, section 3), and `tenbri checkpoint` makes one at once.
+(checkpoints.md, section 3), `tenbri checkpoint` makes one at once, and tenbrid seals one when a
+receipt is asked for an entry no checkpoint covers yet.
 
 ## 5. RFC 3161 timestamps
 

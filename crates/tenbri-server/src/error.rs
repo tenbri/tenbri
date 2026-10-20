@@ -55,10 +55,6 @@ pub enum ErrorCode {
     /// A tail fell too far behind the writer; reconnect with `after_seq`. 503, RESOURCE_EXHAUSTED.
     #[serde(rename = "TENBRI_TAIL_LAGGED")]
     TailLagged,
-    /// No checkpoint covers the entry yet, so there is no receipt for it; the writer makes one
-    /// within 60 seconds of a write. 503, UNAVAILABLE.
-    #[serde(rename = "TENBRI_NOT_CHECKPOINTED")]
-    NotCheckpointed,
     /// A bug. 500, INTERNAL.
     #[serde(rename = "TENBRI_INTERNAL")]
     Internal,
@@ -80,7 +76,6 @@ impl ErrorCode {
             ErrorCode::NoSessionKey => "TENBRI_NO_SESSION_KEY",
             ErrorCode::StreamBroken => "TENBRI_STREAM_BROKEN",
             ErrorCode::TailLagged => "TENBRI_TAIL_LAGGED",
-            ErrorCode::NotCheckpointed => "TENBRI_NOT_CHECKPOINTED",
             ErrorCode::Internal => "TENBRI_INTERNAL",
         }
     }
@@ -97,8 +92,7 @@ impl ErrorCode {
             ErrorCode::DeadlineExceeded
             | ErrorCode::StoreUnavailable
             | ErrorCode::NoSessionKey
-            | ErrorCode::TailLagged
-            | ErrorCode::NotCheckpointed => 503,
+            | ErrorCode::TailLagged => 503,
         }
     }
 
@@ -114,9 +108,7 @@ impl ErrorCode {
             ErrorCode::IdempotencyConflict => G::AlreadyExists,
             ErrorCode::WriteConflict => G::Aborted,
             ErrorCode::DeadlineExceeded | ErrorCode::TailLagged => G::ResourceExhausted,
-            ErrorCode::StoreUnavailable | ErrorCode::NoSessionKey | ErrorCode::NotCheckpointed => {
-                G::Unavailable
-            }
+            ErrorCode::StoreUnavailable | ErrorCode::NoSessionKey => G::Unavailable,
             ErrorCode::StreamBroken => G::DataLoss,
             ErrorCode::Internal => G::Internal,
         }
@@ -218,7 +210,8 @@ impl From<tenbri_writer::ReceiptError> for ApiError {
         match e {
             R::Read(e) => e.into(),
             R::NotFound => ApiError::new(ErrorCode::NotFound, e.to_string()),
-            R::NotCheckpointed(_) => ApiError::new(ErrorCode::NotCheckpointed, e.to_string()),
+            // tenbrid seals a checkpoint before it gives up: it had no key to sign one with.
+            R::NotCheckpointed(_) => ApiError::new(ErrorCode::NoSessionKey, e.to_string()),
         }
     }
 }

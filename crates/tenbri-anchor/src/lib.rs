@@ -9,7 +9,7 @@
 //! - [`request`] makes a request, [`timestamp`] (feature `client`) sends it over HTTP.
 //! - [`verify`] checks a response against the verifier's pinned TSA roots, with no network.
 //! - [`verify_receipt`] checks a whole receipt: `tenbri_merkle::receipt::verify`, then its tokens.
-//! - [`test_tsa`] (feature `test-tsa`) is a TSA in memory for tests and test vectors.
+//! - `test_tsa` (feature `test-tsa`) is a TSA in memory for tests and test vectors.
 
 use std::time::Duration;
 

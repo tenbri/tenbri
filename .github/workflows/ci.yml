@@ -6,14 +6,15 @@
 # - semver: cargo-semver-checks against the last release on crates.io;
 # - storage: the store, writer and CLI against MinIO, the object store anyone can run, as
 #   Artbucket's CI runs Postgres;
-# - python, node, wasm: each binding builds and its package imports, as release.yml builds it;
+# - python, node, wasm: each binding builds as release.yml builds it and passes its own tests
+#   (pytest and mypy; tsc and node:test; wasm-pack test and the built package in Node), the
+#   vectors among them; the WASM verifier stays within its size budget;
 # - contract: tenbrid's OpenAPI and protobuf files hold against the base branch, as Artbucket
 #   holds its v1 contract.
 # The test job also runs the conformance vectors (spec/vectors/) through tenbri-core, tenbri-merkle
 # and the local store, the tamper property tests and the writer crash tests. R2 and S3 run nightly
 # (nightly.yml).
-# Still to come, with the code they test: the vectors through Python, Node and WASM, and fuzz targets
-# (60 seconds here, long runs nightly).
+# Still to come, with the code they test: fuzz targets (60 seconds here, long runs nightly).
 name: CI
 
 on:
@@ -174,8 +175,9 @@ jobs:
         with:
           python-version: "3.10" # the oldest the abi3 wheel promises
       - uses: Swatinem/rust-cache@v2
-      - run: python -m pip install ./bindings/python
-      - run: python bindings/python/tests/test_import.py
+      - run: python -m pip install ./bindings/python pytest mypy
+      - run: python -m pytest bindings/python/tests
+      - run: python -m mypy --strict bindings/python/python/tenbri
 
   node:
     runs-on: ubuntu-latest
@@ -218,6 +220,23 @@ jobs:
       - run: cargo build -p tenbri-core -p tenbri-merkle --target wasm32-unknown-unknown --locked
       - run: wasm-pack build --release --target web --out-dir pkg --no-pack
         working-directory: bindings/wasm
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # The conformance vectors inside WebAssembly, then the package as npm ships it.
+      - run: wasm-pack test --node
+        working-directory: bindings/wasm
+      - run: npm test
+        working-directory: bindings/wasm
+      - name: The verifier stays small
+        working-directory: bindings/wasm
+        run: |
+          size=$(gzip -9 < pkg/tenbri_wasm_bg.wasm | wc -c)
+          echo "tenbri_wasm_bg.wasm: $size bytes gzipped"
+          if [ "$size" -gt 200000 ]; then
+            echo "::error::the WASM verifier is $size bytes gzipped, over its 200,000-byte budget"
+            exit 1
+          fi
 
   # tenbrid's API is a frozen contract per major version: nothing a client of the base branch
   # relies on may change. contract/ holds openapi.v1.yaml and proto/. That they match tenbrid is
