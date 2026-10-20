@@ -1,10 +1,15 @@
 """Tenbri for the OpenAI Agents SDK: every tool call and handoff recorded as a decision.
 
-    from agents import Runner
-    from tenbri import AsyncTenbri
-    from tenbri_openai_agents import TenbriRecorder
+    import tenbri
 
-    log = await AsyncTenbri.open("./audit/support", create=True)
+    tenbri.init()
+    tenbri.instrument_openai_agents()
+    # every Runner.run, run_sync and run_streamed from here on is recorded, and so is every
+    # RunState.approve and reject
+
+:func:`instrument` is that, with its options. :class:`TenbriRecorder` is the lower level: the run
+hooks of one run, on a stream you opened:
+
     async with TenbriRecorder(log) as recorder:
         result = await Runner.run(agent, "refund ch_123", hooks=recorder,
                                   run_config=recorder.run_config())
@@ -36,6 +41,7 @@ from types import TracebackType
 from typing import Any, TypeVar
 
 from agents import Agent, Handoff, RunConfig, RunContextWrapper, RunHooks, Tool, handoff
+from agents.lifecycle import RunHooksBase
 from agents.exceptions import ToolInputGuardrailTripwireTriggered
 from agents.items import ModelResponse, ToolApprovalItem, TResponseInputItem
 from agents.run_config import ToolErrorFormatterArgs
@@ -44,8 +50,9 @@ from agents.tool import default_tool_error_function
 from agents.tool_context import ToolContext
 from agents.tracing import get_current_span, get_current_trace
 from tenbri import AsyncTenbri, Entry, Principal, Status, TenbriError
+from tenbri import _auto as auto
 
-__all__ = ["TenbriRecorder"]
+__all__ = ["TenbriRecorder", "instrument", "uninstrument"]
 
 log = logging.getLogger("tenbri.openai_agents")
 
@@ -75,8 +82,10 @@ class TenbriRecorder(RunHooks[Any]):
     tool name to the action type; ``target`` maps the tool name and parsed arguments to the
     action's target; ``inputs`` maps them to the inputs to pin, each ``{"ref", "version",
     "content"}`` (digested with the stream's ``digest_key``) or ``{"ref", "version", "digest"}``.
-    ``subject`` is the pseudonymous handle of the person the run is about. ``fail_open`` lets
-    actions run when the stream cannot be written (logged, not recorded); the default blocks them.
+    ``subject`` is the pseudonymous handle of the person the run is about. ``describe`` maps the
+    tool name and parsed arguments to any of ``action``, ``target``, ``rule`` and ``subject`` at
+    once, over the others. ``fail_open`` lets actions run when the stream cannot be written
+    (logged, not recorded); the default blocks them.
     """
 
     def __init__(
@@ -88,9 +97,11 @@ class TenbriRecorder(RunHooks[Any]):
         target: Callable[[str, dict[str, Any]], str | None] | None = None,
         inputs: Callable[[str, dict[str, Any]], Iterable[Mapping[str, Any]]] | None = None,
         subject: str | None = None,
+        describe: Callable[[str, dict[str, Any]], Mapping[str, Any]] | None = None,
         fail_open: bool = False,
     ) -> None:
         self.log = log
+        self._describe = describe
         self._tools = tools
         self._action = action
         self._target = target
@@ -244,9 +255,15 @@ class TenbriRecorder(RunHooks[Any]):
             return None
         return _Call(item.agent, name, item.arguments)
 
+    def _fields(self, call: _Call) -> Mapping[str, Any]:
+        return self._describe(call.name, _parse(call.arguments)) if self._describe else {}
+
     def _act(self, call: _Call) -> dict[str, str]:
-        action = {"type": self._action(call.name) if self._action else call.name}
-        target = self._target(call.name, _parse(call.arguments)) if self._target else None
+        fields = self._fields(call)
+        action = {"type": fields.get("action") or (self._action(call.name) if self._action else call.name)}
+        target = fields.get("target")
+        if target is None and self._target:
+            target = self._target(call.name, _parse(call.arguments))
         if target:
             action["target"] = target
         return action
@@ -255,11 +272,13 @@ class TenbriRecorder(RunHooks[Any]):
         """The intent of ``call``, with the reads since the last decision and the mapped inputs."""
         mapped = self._inputs(call.name, _parse(call.arguments)) if self._inputs else ()
         inputs, self._reads = self._reads + [self._input(i) for i in mapped], []
+        fields = self._fields(call)
         draft = {
             "principal": _agent(call.agent),
             "action": self._act(call),
             "inputs": inputs or None,
-            "subject": self._subject,
+            "rule": fields.get("rule"),
+            "subject": fields.get("subject") or self._subject,
             "approval": self._approvals.pop(call_id, None),
         }
         return self._trace(draft)
@@ -336,3 +355,128 @@ def _hash(entry: Entry) -> str:
     # An entry_hash from the bindings would remove this.
     line = json.dumps(entry, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return "sha256:" + hashlib.sha256(b"\x00" + line.encode()).hexdigest()
+
+
+class _Both(RunHooksBase[Any, Any]):
+    """Run hooks that call the recorder's, then the caller's."""
+
+    def __init__(self, *hooks: RunHooksBase[Any, Any]) -> None:
+        self.hooks = hooks
+
+
+def _fan_out(name: str) -> Callable[..., Awaitable[None]]:
+    async def hook(self: _Both, *args: Any, **kwargs: Any) -> None:
+        for h in self.hooks:
+            await getattr(h, name)(*args, **kwargs)
+
+    return hook
+
+
+for _name in [n for n in dir(RunHooksBase) if n.startswith("on_")]:
+    setattr(_Both, _name, _fan_out(_name))
+
+_originals: dict[str, Any] = {}
+# Tool call id -> the approval entry that granted it, from RunState.approve, for the run resuming.
+_approved: dict[str, dict[str, Any]] = {}
+
+
+def instrument(
+    *,
+    actions: auto.Actions | None = None,
+    approver: Principal | Callable[[ToolApprovalItem], Principal | None] | None = None,
+    tools: Collection[str] | Callable[[str], bool] | None = None,
+    subject: str | None = None,
+    fail_open: bool | None = None,
+) -> None:
+    """Records every run from now on, ``Runner.run``, ``run_sync`` and ``run_streamed``, on the
+    stream ``tenbri.init()`` opened (``tenbri.instrument_openai_agents()`` calls this), and every
+    ``RunState.approve`` and ``reject``.
+
+    Each tool call is by ``agent:<the agent's name>``, the action of the tool's name or of the
+    action schema in tenbri.toml of that name: the schema's ``target`` (``stripe:{charge}``) is
+    filled from the call's arguments and its ``policy`` is the rule. ``actions`` overrides that
+    per tool name: ``{"issue_refund": {"target": "stripe:{charge}", "policy":
+    "policy:refund@14"}}``.
+
+    ``approver`` is who answers an interruption (a principal, or a function of the
+    ``ToolApprovalItem``); default ``init(approver=...)`` or ``TENBRI_APPROVER``. ``tools``,
+    ``subject`` and ``fail_open`` are :class:`TenbriRecorder`'s; ``fail_open`` defaults to
+    ``init()``'s."""
+    from agents.run import AgentRunner
+
+    uninstrument()
+
+    def recorder() -> TenbriRecorder:
+        d = auto.default()
+        r = TenbriRecorder(
+            d.aio,
+            tools=tools,
+            describe=lambda tool, args: auto.describe(tool, args, actions),
+            subject=subject,
+            fail_open=d.fail_open if fail_open is None else fail_open,
+        )
+        r._approvals = _approved
+        return r
+
+    def hooked(r: TenbriRecorder, kwargs: dict[str, Any]) -> dict[str, Any]:
+        theirs = kwargs.get("hooks")
+        return {**kwargs, "hooks": _Both(r, theirs) if theirs else r, "run_config": r.run_config(kwargs.get("run_config"))}
+
+    run = _originals["run"] = AgentRunner.run
+    run_streamed = _originals["run_streamed"] = AgentRunner.run_streamed
+    approve = _originals["approve"] = RunState.approve
+    reject = _originals["reject"] = RunState.reject
+
+    async def instrumented_run(self: Any, starting_agent: Any, input: Any, **kwargs: Any) -> Any:
+        async with recorder() as r:
+            return await run(self, starting_agent, input, **hooked(r, kwargs))
+
+    def instrumented_run_streamed(self: Any, starting_agent: Any, input: Any, **kwargs: Any) -> Any:
+        # ponytail: an intent a streamed run leaves open when it raises is reconciled as unknown by
+        # the stream's next writer, rather than closed here.
+        return run_streamed(self, starting_agent, input, **hooked(recorder(), kwargs))
+
+    def answer(item: ToolApprovalItem, approved: bool) -> None:
+        """Records a person's answer before the SDK takes it: an approval, or a refused decision."""
+        d, r = auto.default(), recorder()
+        call = r._call(item)
+        if call is None or not item.call_id:
+            return
+        by = auto.approver(approver, item)
+        try:
+            if not approved:
+                d.outcome(d.intent(r._draft(call, "")), "refused", principal=by)
+            elif by is None:
+                log.warning("tenbri: %s approved, by nobody known: set TENBRI_APPROVER", item.call_id)
+            else:
+                draft = {"kind": "approval", "principal": by, "action": r._act(call), "subject": subject}
+                entry = d.append(r._trace(draft))
+                _approved[item.call_id] = {"by": entry["principal"], "entry": _hash(entry)}
+        except TenbriError as e:
+            if not r._fail_open:
+                raise
+            log.warning("tenbri: not recorded, the answer goes ahead (fail_open): %s", e)
+
+    def instrumented_approve(self: RunState[Any], item: ToolApprovalItem, *args: Any, **kwargs: Any) -> None:
+        answer(item, True)
+        approve(self, item, *args, **kwargs)
+
+    def instrumented_reject(self: RunState[Any], item: ToolApprovalItem, *args: Any, **kwargs: Any) -> None:
+        answer(item, False)
+        reject(self, item, *args, **kwargs)
+
+    AgentRunner.run = instrumented_run  # type: ignore[method-assign]
+    AgentRunner.run_streamed = instrumented_run_streamed  # type: ignore[method-assign]
+    RunState.approve = instrumented_approve  # type: ignore[method-assign,assignment]
+    RunState.reject = instrumented_reject  # type: ignore[method-assign,assignment]
+
+
+def uninstrument() -> None:
+    """Stops recording runs started and answers given from now on."""
+    from agents.run import AgentRunner
+
+    if "run" in _originals:
+        AgentRunner.run = _originals.pop("run")  # type: ignore[method-assign]
+        AgentRunner.run_streamed = _originals.pop("run_streamed")  # type: ignore[method-assign]
+        RunState.approve = _originals.pop("approve")  # type: ignore[method-assign]
+        RunState.reject = _originals.pop("reject")  # type: ignore[method-assign]

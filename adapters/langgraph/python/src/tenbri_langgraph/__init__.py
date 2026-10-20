@@ -2,16 +2,20 @@
 
 A LangChain callback handler with ``raise_error=True``: before a tool runs, its intent is durable
 in the stream, or the tool does not run; after it, the outcome follows (``ok``, ``error``, or
-``refused`` when your tool raises :class:`tenbri.Refused`). LangGraph interrupts that a person
-answers are recorded with :meth:`TenbriCallbackHandler.resume`: an approved call's intent names the
+``refused`` when your tool raises :class:`tenbri.Refused`). The answers a person gives to
+``HumanInTheLoopMiddleware`` interrupts are recorded too: an approved call's intent names the
 approval entry that granted it.
 
-    from tenbri import Tenbri
-    from tenbri_langgraph import TenbriCallbackHandler
+    import tenbri
 
-    log = Tenbri.open("./audit/support", create=True)
-    tenbri = TenbriCallbackHandler(log, principal="agent:support")
-    agent.invoke(inputs, {"callbacks": [tenbri], "configurable": {"thread_id": "t1"}})
+    tenbri.init()
+    tenbri.instrument_langchain()
+    # every tool call of every graph and agent from here on is recorded, and every
+    # graph.invoke(Command(resume=...)) records the answers it carries
+
+:func:`instrument` is that, with its options. :class:`TenbriCallbackHandler` is the lower level: a
+handler on a stream you opened, passed in ``callbacks``, with :meth:`~TenbriCallbackHandler.resume`
+to record the answers.
 """
 
 from __future__ import annotations
@@ -19,16 +23,18 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
+from contextvars import ContextVar
 from typing import Any
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command
-from tenbri import Entry, InvalidRequestError, Principal, Refused, Status, Tenbri, TenbriError
+from tenbri import Entry, Principal, Refused, Status, Tenbri, TenbriError
+from tenbri import _auto as auto
 
-__all__ = ["TenbriCallbackHandler"]
+__all__ = ["TenbriCallbackHandler", "instrument", "uninstrument"]
 
 log_ = logging.getLogger("tenbri_langgraph")
 
@@ -81,31 +87,48 @@ class TenbriCallbackHandler(BaseCallbackHandler):
       with a ``digest_key``, the call's arguments are pinned too, as a keyed digest: what the tool
       ran with can be confirmed later without the log holding it. Arguments and results are never
       stored.
+    - ``describe``: ``(tool, args) -> {action, target, rule, subject}``, any of them, over the
+      tool's name and ``target``.
+    - ``approver``: who answers the interrupts :meth:`record_resume` records: a principal, or
+      ``(tool, args) -> principal``.
     - ``fail_open``: when the intent can't be written, run the tool anyway (logged as a warning)
       instead of failing the call. Off by default: no record, no action.
+
+    ``log`` may be a function returning the stream, called on each use.
     """
 
     raise_error = True
 
     def __init__(
         self,
-        log: Tenbri,
+        log: Tenbri | Callable[[], Tenbri],
         *,
         principal: Principal | None = None,
         tools: Iterable[str] | Callable[[str], bool] | None = None,
         target: Callable[[str, dict[str, Any]], str | None] | None = None,
         inputs: Callable[[str, dict[str, Any]], Iterable[Input]] | None = None,
-        fail_open: bool = False,
+        describe: Callable[[str, dict[str, Any]], Mapping[str, Any]] | None = None,
+        approver: Principal | Callable[[str, dict[str, Any]], Principal | None] | None = None,
+        fail_open: bool | None = False,
     ) -> None:
-        self.log = log
+        self._log = log
         self.principal = principal
         self._tools = tools if tools is None or callable(tools) else frozenset(tools)
         self._target = target
         self._inputs = inputs
+        self._describe = describe
+        self._approver = approver
         self.fail_open = fail_open
         self._open: dict[UUID, Entry] = {}
         # Tool call id -> the approval entry that granted it, from resume().
         self._approved: dict[str, Entry] = {}
+
+    def _failing_open(self) -> bool:
+        return bool(self.fail_open)
+
+    @property
+    def log(self) -> Tenbri:
+        return self._log() if callable(self._log) else self._log
 
     def _selected(self, tool: str) -> bool:
         t = self._tools
@@ -117,17 +140,19 @@ class TenbriCallbackHandler(BaseCallbackHandler):
         name = (metadata or {}).get("lc_agent_name")
         return f"agent:{name}" if name else "agent:langgraph"
 
-    def _pins(self, tool: str, args: dict[str, Any], call: str | None) -> list[Mapping[str, str]]:
+    def _pins(
+        self, tool: str, args: dict[str, Any], call: str | None, subject: str | None
+    ) -> list[Mapping[str, str]]:
         pins: list[Mapping[str, str]] = []
         for i in self._inputs(tool, args) if self._inputs else ():
             if isinstance(i, tuple):
                 ref, version, content = i
-                i = {"ref": ref, "version": version, "digest": self.log.digest(content)}
+                i = {"ref": ref, "version": version, "digest": self.log.digest(content, subject=subject)}
             pins.append(i)
         if call:
             try:
-                d = self.log.digest(_canon(args))
-            except InvalidRequestError:  # no digest_key
+                d = self.log.digest(_canon(args), subject=subject)
+            except TenbriError:  # no key to digest with here: the intent says why
                 pass
             else:
                 pins.append({"ref": f"langchain:tool_call/{call}", "version": "args", "digest": d})
@@ -141,8 +166,11 @@ class TenbriCallbackHandler(BaseCallbackHandler):
         ext: dict[str, str],
         call: str | None,
     ) -> Entry:
-        action = {"type": tool}
-        target = self._target(tool, args) if self._target else None
+        fields = self._describe(tool, args) if self._describe else {}
+        action = {"type": fields.get("action") or tool}
+        target = fields.get("target")
+        if target is None and self._target:
+            target = self._target(tool, args)
         if target is not None:
             action["target"] = target
         d: Entry = {
@@ -150,7 +178,10 @@ class TenbriCallbackHandler(BaseCallbackHandler):
             "principal": principal,
             "ext": {"langchain": {k: v for k, v in ext.items() if v}},
         }
-        if pins := self._pins(tool, args, call):
+        for k in ("rule", "subject"):
+            if fields.get(k) is not None:
+                d[k] = fields[k]
+        if pins := self._pins(tool, args, call, fields.get("subject")):
             d["inputs"] = pins
         if trace := _trace():
             d["trace"] = trace
@@ -182,7 +213,7 @@ class TenbriCallbackHandler(BaseCallbackHandler):
         try:
             self._open[run_id] = self.log.intent(draft)
         except TenbriError as e:
-            if not self.fail_open:
+            if not self._failing_open():
                 raise
             log_.warning("tenbri: %s ran unrecorded (fail-open): %s", tool, e)
 
@@ -238,7 +269,29 @@ class TenbriCallbackHandler(BaseCallbackHandler):
         ``respond`` (the person answers instead of the tool) writes a note. ``resume`` is what you
         would pass to ``Command(resume=...)``: a ``{"decisions": [...]}`` or a single decision,
         or a mapping of interrupt ids to those. Other interrupts are left to :meth:`approve`."""
-        snap = graph.get_state(config)
+        self._answers(graph, graph.get_state(config), resume, lambda tool, args: by)
+        return Command(resume=resume)
+
+    def record_resume(self, graph: Any, config: Any, resume: Any) -> None:
+        """:meth:`resume`, with the ``approver`` given at construction, for a graph about to be
+        invoked with ``Command(resume=resume)``."""
+        self._answers(graph, graph.get_state(config), resume, self._by)
+
+    async def arecord_resume(self, graph: Any, config: Any, resume: Any) -> None:
+        """:meth:`record_resume` for ``ainvoke`` and ``astream``."""
+        self._answers(graph, await graph.aget_state(config), resume, self._by)
+
+    def _by(self, tool: str, args: dict[str, Any]) -> Principal | None:
+        a = self._approver
+        return a(tool, args) if callable(a) else a
+
+    def _answers(
+        self,
+        graph: Any,
+        snap: Any,
+        resume: Any,
+        by: Callable[[str, dict[str, Any]], Principal | None],
+    ) -> None:
         pending = {i.id: i.value for i in snap.interrupts}
         if isinstance(resume, Mapping) and resume and set(resume) <= set(pending):
             answers = dict(resume)
@@ -264,8 +317,7 @@ class TenbriCallbackHandler(BaseCallbackHandler):
             else:
                 continue
             for cid, tool, args, decision in calls:
-                self._record(decision, tool, args, by=by, agent=agent, call=cid, **where)
-        return Command(resume=resume)
+                self._record(decision, tool, args, by=by(tool, args), agent=agent, call=cid, **where)
 
     def _record(
         self,
@@ -273,7 +325,7 @@ class TenbriCallbackHandler(BaseCallbackHandler):
         tool: str,
         args: dict[str, Any],
         *,
-        by: Principal,
+        by: Principal | None,
         agent: Principal,
         call: str | None,
         thread_id: str | None,
@@ -281,6 +333,9 @@ class TenbriCallbackHandler(BaseCallbackHandler):
     ) -> None:
         kind = decision.get("type")
         if kind in ("approve", "edit"):
+            if by is None:
+                log_.warning("tenbri: %s approved by nobody known: set TENBRI_APPROVER", call)
+                return
             if kind == "edit":
                 args = decision["edited_action"].get("args", args)
             self.approve(
@@ -293,13 +348,13 @@ class TenbriCallbackHandler(BaseCallbackHandler):
             "thread_id": thread_id or "",
             "checkpoint_id": checkpoint_id or "",
             "decision": str(kind),
-            "reviewer": by if isinstance(by, str) else f"{by['kind']}:{by['id']}",
+            "reviewer": "" if by is None else by if isinstance(by, str) else f"{by['kind']}:{by['id']}",
         }
         if kind == "reject":
             intent = self.log.intent(self._draft(tool, args, agent, ext, call))
             self.log.outcome(intent, "refused")
         elif kind == "respond":
-            self.log.append({**self._draft(tool, args, by, ext, call), "kind": "note"})
+            self.log.append({**self._draft(tool, args, by or agent, ext, call), "kind": "note"})
 
 
 def _call_ids(values: Any, requests: list[Mapping[str, Any]]) -> list[str | None]:
@@ -317,3 +372,100 @@ def _call_ids(values: Any, requests: list[Mapping[str, Any]]) -> list[str | None
             left.remove(m)
         out.append(m["id"] if m else None)
     return out
+
+
+class _Instrumented(TenbriCallbackHandler):
+    """The handler :func:`instrument` adds to every run: the default stream, and who acts from
+    ``tenbri.agent()`` before the agent's own name and ``init(agent=...)``."""
+
+    def _who(self, metadata: Mapping[str, Any] | None) -> Principal:
+        if self.principal is not None:
+            return self.principal
+        if (p := auto._agent.get()) is not None:
+            return p
+        if name := (metadata or {}).get("lc_agent_name"):
+            return f"agent:{name}"
+        return auto.default().agent or "agent:langgraph"
+
+    def _failing_open(self) -> bool:
+        return auto.default().fail_open if self.fail_open is None else self.fail_open
+
+
+_handler: _Instrumented | None = None
+_originals: dict[str, Any] = {}
+
+
+def instrument(
+    *,
+    actions: auto.Actions | None = None,
+    agent: Principal | None = None,
+    approver: Principal | Callable[[str, dict[str, Any]], Principal | None] | None = None,
+    tools: Iterable[str] | Callable[[str], bool] | None = None,
+    fail_open: bool | None = None,
+) -> None:
+    """Records every LangChain and LangGraph tool call from now on, in every thread, on the
+    stream ``tenbri.init()`` opened (``tenbri.instrument_langchain()`` calls this), with no
+    ``callbacks`` to pass; and, when a graph is invoked or streamed with
+    ``Command(resume=...)``, the answers it carries to ``HumanInTheLoopMiddleware`` interrupts.
+
+    Each tool call is the action of its name, or of the action schema in tenbri.toml of that
+    name: the schema's ``target`` (``stripe:{charge}``) is filled from the call's arguments and its
+    ``policy`` is the rule. ``actions`` overrides that per tool name: ``{"issue_refund":
+    {"target": "stripe:{charge}", "policy": "policy:refund@14"}}``.
+
+    ``agent`` is who acts (default: ``tenbri.agent()``, else the agent's name, else
+    ``init(agent=...)``); ``approver`` who answers the interrupts (a principal, or a function of
+    the tool and its arguments; default ``init(approver=...)`` or ``TENBRI_APPROVER``).
+    ``fail_open`` defaults to ``init()``'s."""
+    global _handler
+    from langchain_core.tracers.context import register_configure_hook
+    from langgraph.pregel import Pregel
+
+    uninstrument()
+    options: dict[str, Any] = {
+        "principal": agent,
+        "tools": tools,
+        "describe": lambda tool, args: auto.describe(tool, args, actions),
+        "approver": lambda tool, args: auto.approver(approver, tool, args),
+        "fail_open": fail_open,
+    }
+    if _handler is None:
+        _handler = _Instrumented(auto.default, **options)
+        # A default, not a value set here: every thread and task sees it.
+        register_configure_hook(ContextVar("tenbri_langchain", default=_handler), True)
+    else:
+        TenbriCallbackHandler.__init__(_handler, auto.default, **options)
+    handler = _handler
+
+    stream = _originals["stream"] = Pregel.stream
+    astream = _originals["astream"] = Pregel.astream
+
+    def resuming(input: Any) -> Any:
+        return input.resume if isinstance(input, Command) and input.resume is not None else None
+
+    def instrumented_stream(self: Any, input: Any, config: Any = None, **kwargs: Any) -> Iterator[Any]:
+        if (resume := resuming(input)) is not None:
+            handler.record_resume(self, config, resume)
+        return stream(self, input, config, **kwargs)
+
+    async def instrumented_astream(
+        self: Any, input: Any, config: Any = None, **kwargs: Any
+    ) -> AsyncIterator[Any]:
+        if (resume := resuming(input)) is not None:
+            await handler.arecord_resume(self, config, resume)
+        async for chunk in astream(self, input, config, **kwargs):
+            yield chunk
+
+    Pregel.stream = instrumented_stream  # type: ignore[method-assign]
+    Pregel.astream = instrumented_astream  # type: ignore[method-assign]
+
+
+def uninstrument() -> None:
+    """Stops recording tool calls and answers from now on."""
+    from langgraph.pregel import Pregel
+
+    if _handler is not None:
+        _handler._tools = lambda tool: False
+    if "stream" in _originals:
+        Pregel.stream = _originals.pop("stream")  # type: ignore[method-assign]
+        Pregel.astream = _originals.pop("astream")  # type: ignore[method-assign]

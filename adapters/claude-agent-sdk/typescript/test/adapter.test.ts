@@ -2,15 +2,15 @@
 // API key. Each test plays tool calls through the SDK and reads back what the stream holds.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { query, type CanUseTool, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { context, trace, TraceFlags } from '@opentelemetry/api'
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks'
-import { Tenbri, type Entry } from 'tenbri'
-import { TenbriHooks, entryHash, type TenbriHooksOptions } from '../src/index.js'
+import { Tenbri, agent, init, type Entry } from 'tenbri'
+import { TenbriHooks, entryHash, instrumentClaudeAgentSdk, type TenbriHooksOptions } from '../src/index.js'
 
 const FAKE = fileURLToPath(new URL('../../../testing/fake-claude.mjs', import.meta.url))
 context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable())
@@ -166,4 +166,41 @@ test('the trace of the active OpenTelemetry span', async () => {
   assert.equal(e.length, 2)
   for (const x of e) assert.deepEqual(x.trace, { trace_id: span.traceId, span_id: span.spanId })
   await log.close()
+})
+
+test('the one-liner: init() and instrumentClaudeAgentSdk(), mapping from tenbri.toml, approver from the environment', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tenbri-claude-'))
+  writeFileSync(join(dir, 'tenbri.toml'), '[actions.issue_refund]\ntarget = "stripe:{charge}"\npolicy = "policy:refund@14"\n')
+  Object.assign(process.env, {
+    TENBRI_STREAM: join(dir, 'stream'),
+    TENBRI_KEYS: join(dir, 'keys'),
+    TENBRI_AGENT: 'agent:support',
+    TENBRI_APPROVER: 'person:alice',
+    TENBRI_SCHEMA: join(dir, 'tenbri.toml'),
+  })
+  const log = await init()
+  const options = (calls: Call[]) => ({
+    pathToClaudeCodeExecutable: FAKE,
+    executable: 'node' as const,
+    env: { ...process.env, FAKE_CLAUDE_SCENARIO: JSON.stringify(calls) },
+    canUseTool: (async (_tool, input) => ({ behavior: 'allow', updatedInput: input })) as CanUseTool,
+  })
+  const play = async (o: ReturnType<typeof options>) => {
+    for await (const _ of query({ prompt: prompt(), options: instrumentClaudeAgentSdk(o) }));
+  }
+  await play(options([{ tool: 'mcp__billing__issue_refund', input: { charge: 'ch_1', amount: 20 }, id: 'r', ask: true, result: 'ok' }]))
+  await agent('agent:triage', () => play(options([{ tool: 'Read', input: { file_path: '/a' }, id: 'c', result: 'ok' }])))
+  const [intent, approval, outcome, read, readOk] = await entries(log)
+  assert.deepEqual(intent.principal, { kind: 'agent', id: 'support' })
+  assert.deepEqual(intent.action, { type: 'issue_refund', target: 'stripe:ch_1' })
+  assert.deepEqual(intent.rule, { ref: 'policy:refund', version: '14', result: 'allow' })
+  assert.deepEqual(intent.inputs?.map((i) => i.ref), ['claude:tool_input']) // keyed by the key store
+  assert.deepEqual(approval.principal, { kind: 'person', id: 'alice' })
+  assert.equal(outcome.status, 'ok')
+  assert.equal((outcome.approval as { entry: string }).entry, entryHash(approval))
+  assert.deepEqual(read.principal, { kind: 'agent', id: 'triage' })
+  assert.deepEqual(read.action, { type: 'Read', target: '/a' })
+  assert.equal(readOk.status, 'ok')
+  await log.close()
+  for (const v of ['TENBRI_STREAM', 'TENBRI_KEYS', 'TENBRI_AGENT', 'TENBRI_APPROVER', 'TENBRI_SCHEMA']) delete process.env[v]
 })

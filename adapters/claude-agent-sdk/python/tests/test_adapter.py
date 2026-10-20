@@ -168,3 +168,63 @@ def test_trace_of_the_active_span(tmp_path: Path) -> None:
             assert x["trace"] == {"trace_id": f"{0xABC:032x}", "span_id": f"{0xDEF:016x}"}
 
     asyncio.run(main())
+
+
+def test_instrument_one_liner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """tenbri.init() and tenbri.instrument_claude_agent_sdk(): the stream, principal, approver and
+    action mapping from the environment and tenbri.toml, and plain SDK code after that."""
+    import tenbri
+    from claude_agent_sdk import ClaudeSDKClient
+
+    from tenbri_claude_agent_sdk import uninstrument
+
+    (tmp_path / "tenbri.toml").write_text(
+        '[actions.issue_refund]\ntarget = "stripe:{charge}"\npolicy = "policy:refund@14"\n'
+    )
+    monkeypatch.setenv("TENBRI_STREAM", str(tmp_path / "stream"))
+    monkeypatch.setenv("TENBRI_KEYS", str(tmp_path / "keys"))
+    monkeypatch.setenv("TENBRI_AGENT", "agent:support")
+    monkeypatch.setenv("TENBRI_APPROVER", "person:alice")
+    monkeypatch.setenv("TENBRI_SCHEMA", str(tmp_path / "tenbri.toml"))
+
+    async def ask(tool: str, _: dict[str, Any], ctx: ToolPermissionContext) -> Any:
+        return PermissionResultAllow()
+
+    def options(calls: list[dict[str, Any]]) -> ClaudeAgentOptions:
+        env = {"FAKE_CLAUDE_SCENARIO": json.dumps(calls)}
+        return ClaudeAgentOptions(cli_path=str(FAKE), env=env, can_use_tool=ask)
+
+    refund = {"charge": "ch_1", "amount": 20}
+    calls = [{"tool": "mcp__billing__issue_refund", "input": refund, "id": "r", "ask": True, "result": "ok"}]
+
+    async def main() -> list[dict[str, Any]]:
+        log = tenbri.init()
+        tenbri.instrument_claude_agent_sdk()
+        try:
+            async for _ in query(prompt=_prompt(), options=options(calls)):
+                pass
+            with tenbri.agent("agent:triage"):
+                client = ClaudeSDKClient(options([{"tool": "Read", "input": {"file_path": "/a"}, "id": "c", "result": "ok"}]))
+            async with client:
+                await client.query("go")
+                async for _ in client.receive_response():
+                    pass
+        finally:
+            uninstrument()
+        async for _ in query(prompt=_prompt(), options=options(calls)):
+            pass  # not recorded any more
+        return await entries(log.aio)
+
+    try:
+        intent, approval, outcome, read, read_ok = asyncio.run(main())
+    finally:
+        tenbri.default().close()
+    assert intent["principal"] == {"kind": "agent", "id": "support"}
+    assert intent["action"] == {"type": "issue_refund", "target": "stripe:ch_1"}
+    assert intent["rule"] == {"ref": "policy:refund", "version": "14", "result": "allow"}
+    # The tool input is pinned by its digest, keyed by the local key store.
+    assert [i["ref"] for i in intent["inputs"]] == ["claude:tool_input"]
+    assert approval["principal"] == {"kind": "person", "id": "alice"}
+    assert outcome["status"] == "ok" and outcome["approval"]["entry"] == entry_hash(approval)
+    assert read["principal"] == {"kind": "agent", "id": "triage"}
+    assert read["action"] == {"type": "Read", "target": "/a"} and read_ok["status"] == "ok"

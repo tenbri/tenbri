@@ -4,17 +4,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { context, trace } from '@opentelemetry/api'
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks'
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base'
-import { MemorySaver } from '@langchain/langgraph'
+import { Command, MemorySaver } from '@langchain/langgraph'
 import { createAgent, humanInTheLoopMiddleware, tool } from 'langchain'
 import { z } from 'zod'
-import { Refused, Tenbri, type Entry } from 'tenbri'
-import { TenbriCallbackHandler } from '../dist/index.js'
+import { Refused, Tenbri, init, type Entry } from 'tenbri'
+import { TenbriCallbackHandler, instrumentLangChain, uninstrumentLangChain } from '../dist/index.js'
 import { model } from './fake.mts'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'tenbri-langgraph-'))
@@ -192,4 +192,43 @@ test('trace from OpenTelemetry', async () => {
     agent.invoke(msg('x'), { callbacks: [new TenbriCallbackHandler(log)] }),
   )
   assert.equal(((await decisions(log))[0].trace as any)?.trace_id, span.spanContext().traceId)
+})
+
+test('the one-liner: init() and instrumentLangChain(), mapping from tenbri.toml, answers from Command({ resume })', async () => {
+  ran.length = 0
+  const dir = tmp()
+  writeFileSync(join(dir, 'tenbri.toml'), '[actions.issue_refund]\ntarget = "stripe:{charge}"\npolicy = "policy:refund@14"\n')
+  process.env.TENBRI_APPROVER = 'person:alice'
+  const log = await init({ stream: join(dir, 's'), keys: join(dir, 'keys'), schema: join(dir, 'tenbri.toml') })
+  instrumentLangChain()
+  const agent = createAgent({
+    model: model([[['issue_refund', { charge: 'ch_1', amount: 20 }]]]),
+    tools: [issueRefund],
+    middleware: [humanInTheLoopMiddleware({ interruptOn: { issue_refund: true } })],
+    checkpointer: new MemorySaver(),
+    name: 'support',
+  })
+  const config = { configurable: { thread_id: 't1' } }
+  try {
+    await agent.invoke(msg('refund ch_1'), config)
+    assert.deepEqual(await decisions(log), []) // paused before the call
+    await agent.invoke(new Command({ resume: { decisions: [{ type: 'approve' }] } }), config)
+    uninstrumentLangChain()
+    await createAgent({ model: model([[['lookup', { order: 'o1' }]]]), tools: [lookup] }).invoke(msg('x'))
+  } finally {
+    uninstrumentLangChain()
+    delete process.env.TENBRI_APPROVER
+  }
+  assert.deepEqual(ran, ['ch_1', 'o1'])
+  const [approval, intent, outcome, ...rest] = await decisions(log)
+  assert.deepEqual(rest, []) // nothing after uninstrumenting
+  assert.equal(approval.kind, 'approval')
+  assert.deepEqual(approval.principal, { kind: 'person', id: 'alice' })
+  assert.deepEqual(intent.principal, { kind: 'agent', id: 'support' })
+  assert.deepEqual(intent.action, { type: 'issue_refund', target: 'stripe:ch_1' })
+  assert.deepEqual(intent.rule, { ref: 'policy:refund', version: '14', result: 'allow' })
+  assert.deepEqual((intent.approval as any).by, { kind: 'person', id: 'alice' })
+  assert.equal(outcome.status, 'ok')
+  assert.ok((await log.verify(log.fingerprint!)).ok)
+  await log.close()
 })
