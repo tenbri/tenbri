@@ -73,6 +73,9 @@ async fn run(cli: Cli) -> Result<(), String> {
         config.grpc_listen,
         config.streams.len()
     );
+    let anchoring = daemon.clone();
+    let anchor = config.clone();
+    tokio::spawn(async move { anchoring.anchor_every(&anchor).await });
     serve(daemon, rest, grpc, signal())
         .await
         .map_err(|e| e.to_string())?;

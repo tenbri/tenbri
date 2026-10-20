@@ -15,6 +15,10 @@
 //! key = "sha256:..."               # pin; default: the stream key held in `keys`
 //! index = "sqlite"                 # the query index: sqlite (default) or parquet
 //!
+//! [anchor]                         # optional: RFC 3161 timestamps of checkpoints
+//! tsa = "https://tsa.example/"     # the timestamp authority's URL
+//! every_s = 3600                   # how often the latest checkpoint is timestamped
+//!
 //! [[tokens]]                       # `tenbrid token` makes one
 //! sha256 = "sha256:..."            # SHA-256 of the bearer token; the token is never stored
 //! principal = { kind = "agent", id = "support-assistant" }
@@ -50,6 +54,21 @@ pub struct Config {
     pub streams: BTreeMap<String, StreamConfig>,
     #[serde(default)]
     pub tokens: Vec<TokenConfig>,
+    pub anchor: Option<AnchorConfig>,
+}
+
+/// Opt-in RFC 3161 timestamps: the latest checkpoint of every stream, every `every_s` seconds
+/// (hourly by default), if it has none yet. The token goes next to it, `anchors/<size>.tsr`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnchorConfig {
+    pub tsa: String,
+    #[serde(default = "every_s")]
+    pub every_s: u64,
+}
+
+fn every_s() -> u64 {
+    3600
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -130,6 +149,9 @@ impl Config {
                     .into(),
             );
         }
+        if c.anchor.as_ref().is_some_and(|a| a.every_s == 0) {
+            return Err("anchor: every_s must be at least 1".into());
+        }
         if c.queue == 0 || c.queue > tokio::sync::Semaphore::MAX_PERMITS {
             return Err(format!("queue = {}: out of range", c.queue));
         }
@@ -184,6 +206,10 @@ mod tests {
         let c = Config::parse(&s3, Path::new("/etc/tenbri"), |_| None).unwrap();
         assert_eq!(c.streams["support"].path, "s3://bucket/audit");
         assert_eq!((c.queue, c.deadline_ms), (10_000, 2_000));
+        assert!(c.anchor.is_none());
+        let anchored = format!("{FILE}[anchor]\ntsa = \"http://tsa\"\n");
+        let c = Config::parse(&anchored, Path::new("/etc/tenbri"), |_| None).unwrap();
+        assert_eq!(c.anchor.unwrap().every_s, 3600);
 
         let env = |k: &str| match k {
             "TENBRI_LISTEN" => Some("0.0.0.0:80".to_owned()),

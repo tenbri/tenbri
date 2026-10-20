@@ -85,6 +85,19 @@ pub struct GetEntryResponse {
     pub entry: ::core::option::Option<QueriedEntry>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetReceiptRequest {
+    #[prost(string, tag = "1")]
+    pub stream: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetReceiptResponse {
+    /// The receipt file, canonical JSON (spec/receipts.md), as `tenbri receipt verify` reads it.
+    #[prost(bytes = "vec", tag = "1")]
+    pub receipt: ::prost::alloc::vec::Vec<u8>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct QueryEntriesRequest {
     #[prost(string, tag = "1")]
     pub stream: ::prost::alloc::string::String,
@@ -453,6 +466,32 @@ pub mod tenbri_service_client {
                 .insert(GrpcMethod::new("tenbri.v1.TenbriService", "GetEntry"));
             self.inner.unary(req, path, codec).await
         }
+        /// A receipt for one entry: a self-contained proof, checked offline against the stream's pinned
+        /// key (spec/receipts.md).
+        pub async fn get_receipt(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetReceiptRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetReceiptResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/tenbri.v1.TenbriService/GetReceipt",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("tenbri.v1.TenbriService", "GetReceipt"));
+            self.inner.unary(req, path, codec).await
+        }
         /// Entries by input, action, principal, target or subject, in sequence order.
         pub async fn query_entries(
             &mut self,
@@ -606,6 +645,15 @@ pub mod tenbri_service_server {
             request: tonic::Request<super::GetEntryRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetEntryResponse>,
+            tonic::Status,
+        >;
+        /// A receipt for one entry: a self-contained proof, checked offline against the stream's pinned
+        /// key (spec/receipts.md).
+        async fn get_receipt(
+            &self,
+            request: tonic::Request<super::GetReceiptRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetReceiptResponse>,
             tonic::Status,
         >;
         /// Entries by input, action, principal, target or subject, in sequence order.
@@ -933,6 +981,51 @@ pub mod tenbri_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetEntrySvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/tenbri.v1.TenbriService/GetReceipt" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetReceiptSvc<T: TenbriService>(pub Arc<T>);
+                    impl<
+                        T: TenbriService,
+                    > tonic::server::UnaryService<super::GetReceiptRequest>
+                    for GetReceiptSvc<T> {
+                        type Response = super::GetReceiptResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetReceiptRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TenbriService>::get_receipt(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetReceiptSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

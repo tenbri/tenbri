@@ -103,12 +103,26 @@ impl Chain {
 
     /// Checks `line` against every rule, as the next entry, without changing the chain.
     pub fn check(&self, line: &[u8]) -> Result<Checked, Error> {
+        self.check_at(line, false)
+    }
+
+    /// Checks `line` as a later entry that may skip some, as a receipt holds them
+    /// (spec/receipts.md): its `seq` is above the last one's, and only the rules one entry and the
+    /// keys before it decide apply: genesis, stream, signer, signature, attestations, key events.
+    /// `prev`, id uniqueness, `hlc`, intents and approvals need the entries in between; the
+    /// receipt's inclusion proofs stand in for them. Feed it every key entry in order, then
+    /// [`Chain::apply`] what it accepts.
+    pub fn check_detached(&self, line: &[u8]) -> Result<Checked, Error> {
+        self.check_at(line, true)
+    }
+
+    fn check_at(&self, line: &[u8], detached: bool) -> Result<Checked, Error> {
         let (entry, value) = parse_line(line)?;
-        let seq = self.seq + 1;
-        if entry.seq != seq {
+        let seq = if detached { entry.seq } else { self.seq + 1 };
+        if entry.seq != seq || entry.seq <= self.seq {
             return Err(Error::new(
                 Code::BadSeq,
-                format!("expected seq {seq}, found {}", entry.seq),
+                format!("expected seq {}, found {}", self.seq + 1, entry.seq),
             ));
         }
         let signer_key = if seq == 1 {
@@ -120,7 +134,7 @@ impl Chain {
                     format!("`stream` is {}", entry.stream),
                 ));
             }
-            if entry.prev.as_deref() != self.last_hash() {
+            if !detached && entry.prev.as_deref() != self.last_hash() {
                 return Err(Error::new(
                     Code::BadPrev,
                     "`prev` is not the previous entry's hash",
@@ -129,7 +143,7 @@ impl Chain {
             None
         };
         let id = parse_ulid(&entry.id).expect("validated");
-        if self.ids.contains(&id) {
+        if !detached && self.ids.contains(&id) {
             return Err(Error::new(
                 Code::DuplicateId,
                 format!("id {} is used before", entry.id),
@@ -145,12 +159,14 @@ impl Chain {
             &entry.sig,
         )?;
         check_attestations(&entry, &value)?;
-        if let Some(h) = entry.hlc {
-            if self.hlc.is_some_and(|last| (h.wall, h.count) < last) {
-                return Err(Error::new(Code::BadHlc, "`hlc` went backwards"));
+        if !detached {
+            if let Some(h) = entry.hlc {
+                if self.hlc.is_some_and(|last| (h.wall, h.count) < last) {
+                    return Err(Error::new(Code::BadHlc, "`hlc` went backwards"));
+                }
             }
+            self.check_links(&entry)?;
         }
-        self.check_links(&entry)?;
         let invalidates = match (seq, &entry.key) {
             (1, _) | (_, None) => None,
             (_, Some(k)) => self.check_key_event(k)?,

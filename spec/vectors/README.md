@@ -9,8 +9,11 @@ never edits an old one.
 the format is final; they are frozen at the v0.1.0 tag. They are made from fixed seeds by
 `cargo run -p tenbri-core --example vectors -- spec/vectors`, except the canonical-JSON cases,
 which are written by hand, and `merkle.json` and `checkpoints.json`, made from the `valid` stream of
-`chains.json` by `cargo run -p tenbri-merkle --example vectors -- spec/vectors`, and `privacy.json`,
-made by `cargo run -p tenbri-crypt --example vectors -- spec/vectors`. Error codes are the spec's (section 10).
+`chains.json` by `cargo run -p tenbri-merkle --example vectors -- spec/vectors`, `privacy.json`,
+made by `cargo run -p tenbri-crypt --example vectors -- spec/vectors`, and `receipts.json`, made
+from the same seeds as `chains.json` and a test timestamp authority by
+`cargo run -p tenbri-anchor --features test-tsa --example receipt-vectors -- spec/vectors`. Error
+codes are the spec's (section 10).
 
 | File | Each case | An implementation checks |
 | --- | --- | --- |
@@ -23,6 +26,7 @@ made by `cargo run -p tenbri-crypt --example vectors -- spec/vectors`. Error cod
 | `merkle.json` | The `leaves` (14 entry hashes), the tree `root` at every size 0 to 14, and `inclusion` and `consistency` proofs, each with `valid`: every proof of the 14-leaf tree's prefixes, and tampered ones | The Merkle tree hash and both proof verifications ([checkpoints.md](../checkpoints.md), section 1) |
 | `checkpoints.json` | `notes`: a signed `note`, a `signer_pub`, and the parsed `origin`, `size`, `root` and `signed_by` (`true`, `false`, or `null` for no signature line by that key), or the `error`; `streams`: a `pin`, the `lines`, a `checkpoint`, and the `result`: `ok` with the entry count and current root, or the first broken `seq` and its `error` | Parsing and signing checkpoints, and a stream against one (sections 2 and 4) |
 | `privacy.json` | `derivation`: a `data_key` and its `blob_key` and `digest_key`; `digests`: a `data_key`, a `content` and its `digest`; `blobs`: `valid` seals (`data_key`, `stream`, `nonce`, `plaintext`, the `blob` in hex, its `address` and storage `path`) and `invalid` ones with the `error` (`address_mismatch` or `not_opened`); `erased`: a stream (`pin`, `lines`) whose subject `cust_42` was erased, its `blobs` by address, the data `keys` still held, the `bodies` they open (`null`: erased) and the `inputs` whose digests they confirm, and the `result` | Key derivation, digests, sealing and opening, and that an erased subject's stream still verifies ([privacy.md](../privacy.md)) |
+| `receipts.json` | `tsa_roots`: the PEM root of the test timestamp authority; `cases`: a `pin`, the `receipt` file's exact text, and the `result`: `proves` (the seqs of the non-key entries, or of all if there are none), the checkpoint `size` and the `timestamps` (`genTime` in Unix seconds) checked against `tsa_roots`, or the `error` | Receipts offline: entries, key history, proofs, the checkpoint's signer, RFC 3161 tokens ([receipts.md](../receipts.md), section 3) |
 
 Every stream in `checkpoints.json` verifies on its own; only the checkpoint catches the change. Its
 `truncation-behind-checkpoint` and `rewrite-behind-checkpoint` cases replace the placeholders of the
