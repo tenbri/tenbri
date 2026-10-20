@@ -4,7 +4,7 @@
 every tool call your agent makes becomes a signed, chained decision in a Tenbri stream.
 
 ```sh
-npm install @tenbri/claude-agent-sdk tenbri@next @anthropic-ai/claude-agent-sdk
+npm install @tenbri/claude-agent-sdk@next tenbri@next @anthropic-ai/claude-agent-sdk
 ```
 
 ```ts

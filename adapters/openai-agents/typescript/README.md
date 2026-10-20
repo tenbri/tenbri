@@ -5,7 +5,7 @@ in TypeScript: every tool call, handoff and approval of an agent becomes a signe
 that anyone holding the stream's key fingerprint can verify offline.
 
 ```sh
-npm install @tenbri/openai-agents tenbri@next @openai/agents
+npm install @tenbri/openai-agents@next tenbri@next @openai/agents
 ```
 
 ```ts

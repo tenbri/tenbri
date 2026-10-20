@@ -1,6 +1,6 @@
 // A support agent that can issue refunds, every tool call recorded in a Tenbri stream.
 //
-//   npm install @tenbri/claude-agent-sdk @anthropic-ai/claude-agent-sdk tenbri@next zod
+//   npm install @tenbri/claude-agent-sdk@next @anthropic-ai/claude-agent-sdk tenbri@next zod
 //   export ANTHROPIC_API_KEY=...
 //   npm run example
 //

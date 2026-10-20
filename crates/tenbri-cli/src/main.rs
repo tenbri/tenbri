@@ -70,8 +70,10 @@ enum Command {
     /// with its verification status, seq, entry hash and what the answer is current to.
     ///
     /// Uses the stream's index when there is one (`tenbri index rebuild`), bringing it up to HEAD
-    /// first; its answers are "indexed" until `--verify` checks them against the stream. Without
-    /// an index, reads and verifies the whole stream.
+    /// first and checking each answer against the batch in storage that holds it, so an edited
+    /// batch fails the query (exit 1). Its answers are "indexed", not signature-checked, until
+    /// `--verify` checks them against the whole stream. Without an index, reads and verifies the
+    /// whole stream.
     Query {
         path: String,
         /// An input the entry used, as ref@version (policy:refund@14), or ref for any version;
@@ -787,6 +789,13 @@ async fn query<S: Store>(
                     }
                 }
                 status = verified;
+            } else {
+                tenbri_index::confirm(store, &page.hits)
+                    .await
+                    .map_err(|e| match e.kind() {
+                        io::ErrorKind::InvalidData => Fail(1, e.to_string()),
+                        _ => e.into(),
+                    })?;
             }
             (page.hits, page.next, state, status)
         }

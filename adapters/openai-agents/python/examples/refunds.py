@@ -1,6 +1,6 @@
 """A support agent whose refunds are recorded in a Tenbri stream, approvals included.
 
-    pip install tenbri-openai-agents
+    pip install --pre tenbri-openai-agents
     python examples/refunds.py ./audit
 
 With OPENAI_API_KEY set it asks the model; without, a scripted model plays the same turns, so the

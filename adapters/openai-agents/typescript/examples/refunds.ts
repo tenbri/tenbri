@@ -1,6 +1,6 @@
 // A support agent whose refunds are recorded in a Tenbri stream, approvals included.
 //
-//   npm install @tenbri/openai-agents @openai/agents
+//   npm install @tenbri/openai-agents@next tenbri@next @openai/agents
 //   node examples/refunds.ts ./audit
 //
 // With OPENAI_API_KEY set it asks the model; without, a scripted model plays the same turns, so the

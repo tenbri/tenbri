@@ -2,7 +2,7 @@
 // a person reviews and approves first. Runs offline with a scripted model; swap in a real one
 // (`initChatModel('anthropic:claude-sonnet-5-5')`) and nothing else changes.
 //
-//   npm install --save tenbri @tenbri/langgraph langchain @langchain/core @langchain/langgraph zod
+//   npm install --save tenbri@next @tenbri/langgraph@next langchain @langchain/core @langchain/langgraph zod
 //   node refund-agent.mts
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
