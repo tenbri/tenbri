@@ -227,7 +227,7 @@ jobs:
           else
             tar -czf "dist/$name.tar.gz" -C "$RUNNER_TEMP" "$name"
           fi
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*
       - uses: actions/upload-artifact@v7
@@ -416,7 +416,7 @@ jobs:
           for w in dist/*.whl; do
             case "$w" in *"-$PEP440-"*) ;; *) echo "::error::$w is not version $PEP440"; exit 1 ;; esac
           done
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: bindings/python/dist/*
       - uses: actions/upload-artifact@v7
@@ -696,7 +696,7 @@ jobs:
           docker buildx imagetools create $tags $(printf "$NAME@sha256:%s " *)
           docker buildx imagetools inspect "$NAME:$VERSION"
           echo "digest=$(docker buildx imagetools inspect "$NAME:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)" >> "$GITHUB_OUTPUT"
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.NAME }}
           subject-digest: ${{ steps.join.outputs.digest }}
