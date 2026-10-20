@@ -10,3 +10,11 @@ homepage.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+sha2 = "0.11"
+tenbri-core.workspace = true
+
+[dev-dependencies]
+proptest = "1"
+serde_json = "1"

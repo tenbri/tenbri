@@ -8,7 +8,8 @@ never edits an old one.
 **Draft.** These vectors go with the provisional [format v1](../format-v1.md) and may change until
 the format is final; they are frozen at the v0.1.0 tag. They are made from fixed seeds by
 `cargo run -p tenbri-core --example vectors -- spec/vectors`, except the canonical-JSON cases,
-which are written by hand. Error codes are the spec's (section 10).
+which are written by hand, and `merkle.json` and `checkpoints.json`, made from the `valid` stream of
+`chains.json` by `cargo run -p tenbri-merkle --example vectors -- spec/vectors`. Error codes are the spec's (section 10).
 
 | File | Each case | An implementation checks |
 | --- | --- | --- |
@@ -18,6 +19,12 @@ which are written by hand. Error codes are the spec's (section 10).
 | `chains.json` | A `pin` (or `null`), the stream's `lines` in order, and the `result`: `ok` with the entry count, or the first broken `seq` and its `error`. Cases with `skip` are placeholders for a later pre-release | A whole stream: chain, keys, rotation, revocation, intents |
 | `heads.json` | A stored `head`, its `signer_pub`, and its `signing_input` or `error` | HEAD's form and signature |
 | `streams.json` + `streams/<name>/` | A stream directory (HEAD and `batches/`), a `pin`, and the `result` | Reading the storage layout by following HEAD |
+| `merkle.json` | The `leaves` (14 entry hashes), the tree `root` at every size 0 to 14, and `inclusion` and `consistency` proofs, each with `valid`: every proof of the 14-leaf tree's prefixes, and tampered ones | The Merkle tree hash and both proof verifications ([checkpoints.md](../checkpoints.md), section 1) |
+| `checkpoints.json` | `notes`: a signed `note`, a `signer_pub`, and the parsed `origin`, `size`, `root` and `signed_by` (`true`, `false`, or `null` for no signature line by that key), or the `error`; `streams`: a `pin`, the `lines`, a `checkpoint`, and the `result`: `ok` with the entry count and current root, or the first broken `seq` and its `error` | Parsing and signing checkpoints, and a stream against one (sections 2 and 4) |
+
+Every stream in `checkpoints.json` verifies on its own; only the checkpoint catches the change. Its
+`truncation-behind-checkpoint` and `rewrite-behind-checkpoint` cases replace the placeholders of the
+same name in `chains.json`. Merkle leaf indices start at 0: entry `seq` is leaf `seq - 1`.
 
 Strings in the JSON files are the exact bytes, as UTF-8; `"\u0000"` in a `signing_input` is the
 0x00 byte.

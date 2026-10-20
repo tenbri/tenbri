@@ -23,6 +23,7 @@ keychain = ["tenbri-keys/keychain"]
 clap = { version = "4", features = ["derive"] }
 tenbri-core.workspace = true
 tenbri-keys.workspace = true
+tenbri-merkle.workspace = true
 tenbri-schema.workspace = true
 tenbri-store.workspace = true
 tenbri-writer.workspace = true

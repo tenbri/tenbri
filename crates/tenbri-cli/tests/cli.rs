@@ -175,3 +175,117 @@ fn schema_check() {
     );
     std::fs::remove_dir_all(&t).unwrap();
 }
+
+/// `verify --checkpoint` on the stream cases of spec/vectors/checkpoints.json, each laid out on
+/// disk with one entry per batch and a HEAD signed by `sess:a1`.
+#[test]
+fn verify_against_checkpoints() {
+    use tenbri_core::sign::{SigningKey, entry_hash, sha256, sign_head};
+    let v: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../spec/vectors/checkpoints.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let seed = sha256(b"tenbri vector key s1");
+    let s1 =
+        SigningKey::from_bytes(&tenbri_core::encoding::prefixed::<32>(&seed, "sha256:").unwrap());
+    let t = std::env::temp_dir().join(format!("tenbri-cli-cp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&t);
+    let keys = t.join("keys");
+    let case = |name: &str| {
+        let c = v["streams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap()
+            .clone();
+        let dir = t.join(name);
+        std::fs::create_dir_all(dir.join("batches")).unwrap();
+        let lines: Vec<&str> = c["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l.as_str().unwrap())
+            .collect();
+        for (i, l) in lines.iter().enumerate() {
+            std::fs::write(
+                dir.join(format!("batches/{:012}.jsonl", i + 1)),
+                format!("{l}\n"),
+            )
+            .unwrap();
+        }
+        let n = lines.len() as u64;
+        let mut head = tenbri_core::Head {
+            v: 1,
+            stream: c["checkpoint"]
+                .as_str()
+                .unwrap()
+                .lines()
+                .next()
+                .unwrap()
+                .to_owned(),
+            seq: n,
+            hash: entry_hash(lines[n as usize - 1].as_bytes()),
+            counter: n,
+            batch: n,
+            signer: "sess:a1".into(),
+            sig: String::new(),
+        };
+        std::fs::write(dir.join("HEAD"), sign_head(&mut head, &s1)).unwrap();
+        std::fs::write(dir.join("cp.note"), c["checkpoint"].as_str().unwrap()).unwrap();
+        (dir, c["pin"].as_str().unwrap().to_owned())
+    };
+    let run = |dir: &Path, pin: Option<&str>| {
+        let (st, cp) = (dir.to_str().unwrap(), dir.join("cp.note"));
+        let mut args = vec!["verify", st, "--checkpoint", cp.to_str().unwrap()];
+        args.extend(pin.map(|p| ["--key", p]).into_iter().flatten());
+        tenbri(&keys, &args, "")
+    };
+
+    let (dir, pin) = case("checkpoint-behind-head");
+    let o = run(&dir, Some(&pin));
+    assert_eq!(o.status.code(), Some(0), "{o:?}");
+    assert!(
+        out(&o).starts_with("matches checkpoint tnb1:"),
+        "{}",
+        out(&o)
+    );
+    assert_eq!(
+        run(&dir, None).status.code(),
+        Some(3),
+        "a checkpoint does not replace --key"
+    );
+
+    let (dir, pin) = case("truncation-behind-checkpoint");
+    assert_eq!(
+        tenbri(&keys, &["verify", dir.to_str().unwrap(), "--key", &pin], "")
+            .status
+            .code(),
+        Some(0),
+        "the truncated stream verifies on its own"
+    );
+    let o = run(&dir, Some(&pin));
+    assert_eq!(o.status.code(), Some(1), "{o:?}");
+    assert!(
+        out(&o).starts_with("broken at seq 9: truncated"),
+        "{}",
+        out(&o)
+    );
+
+    let (dir, pin) = case("rewrite-behind-checkpoint");
+    let o = run(&dir, Some(&pin));
+    assert_eq!(o.status.code(), Some(1), "{o:?}");
+    assert!(out(&o).starts_with("broken at seq 10: fork"), "{}", out(&o));
+
+    std::fs::write(dir.join("cp.note"), "not a checkpoint").unwrap();
+    assert_eq!(
+        run(&dir, Some(&pin)).status.code(),
+        Some(2),
+        "a malformed checkpoint"
+    );
+    std::fs::remove_dir_all(&t).unwrap();
+}

@@ -19,7 +19,7 @@ that is a bug to report.
 | HEAD | A small signed object naming the latest sequence number and entry hash |
 | Stream key | The long-lived Ed25519 key that identifies a stream and signs its key events |
 | Session key | A short-lived Ed25519 key, certified by the stream key, that signs everything else |
-| Trust root | What a verifier trusts before reading anything; in format v1 a pinned stream key fingerprint |
+| Trust root | What a verifier trusts before reading anything; in format v1 a pinned stream key fingerprint, and any [checkpoint](checkpoints.md) it saw before |
 
 ## 2. Encodings
 
@@ -84,7 +84,7 @@ member that is `null` is the same as an absent one; writers omit it.
 | --- | --- | --- |
 | `v` | yes | Format version, the integer `1` |
 | `id` | yes | Entry id (ULID), unique within the stream |
-| `stream` | yes | Stream id: `tnb1:` and the first 32 hex digits of SHA-256 of the genesis stream key. Human names are labels in config, never identity. Also the checkpoint origin (*reserved*) |
+| `stream` | yes | Stream id: `tnb1:` and the first 32 hex digits of SHA-256 of the genesis stream key. Human names are labels in config, never identity. Also the [checkpoint](checkpoints.md) origin |
 | `seq` | yes | Starts at 1 and increases by exactly 1; at most 2^53 - 1 |
 | `ts` | yes | Timestamp claimed by the writer, not proven |
 | `hlc` | no | Hybrid logical clock `{wall, count}`: `wall` milliseconds since the Unix epoch, `count` a counter, both non-negative integers. Within a stream, entries that carry `hlc` never decrease in (`wall`, `count`) order |
@@ -242,7 +242,7 @@ HEAD signature, and the reverse.
 <stream>/
   HEAD                              compare-and-swap
   batches/000000000001.jsonl        named by first seq; written once, never rewritten
-  checkpoints/000000002000.note     reserved
+  checkpoints/000000002000.note     checkpoints.md, section 3
   anchors/000000002000.tsr          reserved
   blobs/ct-sha256/ab/cd…            reserved
 ```
@@ -300,8 +300,8 @@ key, which proves nothing about who wrote it, and it says so.
 Detected: any edit, including whitespace; reordering, insertion and deletion before HEAD; forged
 entries; entries signed by an expired, revoked, uncertified or wrong key. Not detected in format v1
 without checkpoints: truncation of the tail together with a rewritten HEAD by a key holder, and a
-full rewrite by the stream key holder. Checkpoints held outside the operator close that gap
-(*reserved*: Merkle checkpoints as C2SP signed notes, consistency proofs, receipts, anchors).
+full rewrite by the stream key holder. [Checkpoints](checkpoints.md) held outside the operator
+close that gap for the entries they cover (*reserved*: receipts, anchors).
 
 ## 10. Error codes
 
@@ -332,3 +332,4 @@ full rewrite by the stream key holder. Checkpoints held outside the operator clo
 | `bad_head` | HEAD malformed, unsigned, rolled back, or not matching the stream |
 | `bad_batch` | A batch file that breaks the layout rules |
 | `missing_batch` | A batch HEAD needs is absent |
+| `bad_checkpoint`, `truncated`, `fork` | A checkpoint's failures ([checkpoints.md](checkpoints.md#5-error-codes)) |

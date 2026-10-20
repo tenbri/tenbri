@@ -1,6 +1,6 @@
 use std::fmt;
 
-/// The error codes of format v1 (spec/format-v1.md, section 10). Their names are stable.
+/// The error codes of format v1 (spec/format-v1.md, section 10, and spec/checkpoints.md). Their names are stable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Code {
     Parse,
@@ -28,11 +28,14 @@ pub enum Code {
     BadHead,
     BadBatch,
     MissingBatch,
+    BadCheckpoint,
+    Truncated,
+    Fork,
 }
 
 impl Code {
     /// Every code, in the order of the spec's table.
-    pub const ALL: [Code; 25] = [
+    pub const ALL: [Code; 28] = [
         Code::Parse,
         Code::DuplicateKey,
         Code::NotInteger,
@@ -58,6 +61,9 @@ impl Code {
         Code::BadHead,
         Code::BadBatch,
         Code::MissingBatch,
+        Code::BadCheckpoint,
+        Code::Truncated,
+        Code::Fork,
     ];
 
     /// The code as the spec and the test vectors spell it, e.g. `bad_signature`.
@@ -88,6 +94,9 @@ impl Code {
             Code::BadHead => "bad_head",
             Code::BadBatch => "bad_batch",
             Code::MissingBatch => "missing_batch",
+            Code::BadCheckpoint => "bad_checkpoint",
+            Code::Truncated => "truncated",
+            Code::Fork => "fork",
         }
     }
 }
