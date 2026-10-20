@@ -432,6 +432,61 @@ components:
           items:
             $ref: '#/components/schemas/Violation'
           description: For TENBRI_SCHEMA_VIOLATION.
+    AppendedBody:
+      type: object
+      description: An appended entry.
+      required:
+      - entry
+      - replayed
+      properties:
+        entry:
+          type: object
+          description: The entry as stored (format v1, canonical JSON).
+        replayed:
+          type: boolean
+          description: The Idempotency-Key was used before; this is the entry it wrote.
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Schema warnings, such as an action type tenbri.toml does not declare.
+    BatchBody:
+      type: object
+      required:
+      - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppendedBody'
+          description: In the order of the request's entries.
+    BatchRequest:
+      type: object
+      description: A batch of drafts.
+      required:
+      - entries
+      properties:
+        entries:
+          type: array
+          items:
+            type: object
+          description: Drafts, each with its `id` (a ULID, the idempotency key) and `kind`.
+    BrokenBody:
+      type: object
+      required:
+      - seq
+      - code
+      - message
+      properties:
+        code:
+          type: string
+          description: The format v1 error code (bad_signature, ...).
+        message:
+          type: string
+        seq:
+          type: integer
+          format: int64
+          minimum: 0
     ErrorBody:
       type: object
       description: 'A failed request: the body of every REST error and of gRPC''s `tenbri-error-bin`.'
@@ -460,6 +515,69 @@ components:
       - TENBRI_STREAM_BROKEN
       - TENBRI_TAIL_LAGGED
       - TENBRI_INTERNAL
+    QueriedBody:
+      type: object
+      description: An entry and whether it verifies against the stream's pinned key.
+      required:
+      - verification
+      - entry
+      properties:
+        entry:
+          type: object
+        verification:
+          $ref: '#/components/schemas/VerificationBody'
+    QueryBody:
+      type: object
+      required:
+      - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueriedBody'
+        next_after_seq:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: 'When more entries match: pass it as `after_seq` for the next page.'
+          minimum: 0
+    StatusBody:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          description: ok, ready or not_ready.
+    VerificationBody:
+      type: string
+      enum:
+      - verified
+      - broken
+    VerifyBody:
+      type: object
+      required:
+      - stream
+      - entries
+      - pinned_key
+      properties:
+        broken:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/BrokenBody'
+            description: Absent when the stream verifies.
+        entries:
+          type: integer
+          format: int64
+          description: Entries checked before the first break, or all of them.
+          minimum: 0
+        pinned_key:
+          type: string
+          description: The genesis key fingerprint the stream was checked against.
+        stream:
+          type: string
+          description: The stream id (tnb1:...).
     Violation:
       type: object
       description: A schema requirement the entry does not meet.

@@ -53,3 +53,32 @@ fn openapi_document_matches_the_routes() {
         &tenbri_server::openapi_yaml(),
     );
 }
+
+/// Every `$ref` names a schema the document defines: the routes document their operations, and a
+/// body type missing from `components(schemas(...))` would leave a dangling reference that
+/// OpenAPI tools refuse to load.
+#[test]
+fn openapi_references_resolve() {
+    let yaml = tenbri_server::openapi_yaml();
+    let defined: Vec<&str> = yaml
+        .split_once("\n  schemas:\n")
+        .expect("components.schemas")
+        .1
+        .lines()
+        .take_while(|l| l.is_empty() || l.starts_with("    "))
+        .filter_map(|l| l.strip_prefix("    ")?.strip_suffix(':'))
+        .filter(|n| !n.starts_with(' '))
+        .collect();
+    let refs: Vec<&str> = yaml
+        .split("#/components/schemas/")
+        .skip(1)
+        .map(|r| r.split(['\'', '"', '\n']).next().unwrap())
+        .collect();
+    assert!(!refs.is_empty());
+    for r in refs {
+        assert!(
+            defined.contains(&r),
+            "{r} is referenced but not defined; defined: {defined:?}"
+        );
+    }
+}
