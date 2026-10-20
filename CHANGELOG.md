@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-beta.4](https://github.com/tenbri/tenbri/compare/v0.1.0-beta.3...v0.1.0-beta.4) (2026-10-20)
+
+
+### Features
+
+* **bindings:** init() records the stream's pin ([#52](https://github.com/tenbri/tenbri/issues/52)) ([8c079a1](https://github.com/tenbri/tenbri/commit/8c079a119e19b77b812ac09b6624125c5211c811))
+
 ## [0.1.0-beta.3](https://github.com/tenbri/tenbri/compare/v0.1.0-beta.2...v0.1.0-beta.3) (2026-10-20)
 
 
