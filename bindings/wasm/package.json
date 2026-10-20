@@ -18,6 +18,7 @@
     "pkg/tenbri_wasm_bg.wasm.d.ts"
   ],
   "scripts": {
-    "build": "wasm-pack build --release --target web --out-dir pkg --no-pack"
+    "build": "wasm-pack build --release --target web --out-dir pkg --no-pack",
+    "test": "node --test test/*.test.mjs"
   }
 }

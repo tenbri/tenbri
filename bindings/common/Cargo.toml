@@ -1,0 +1,25 @@
+[package]
+name = "tenbri-bindings"
+description = "What the Tenbri Python and Node packages share: a stream to write, verify and query."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# Compiled into the tenbri wheel and the tenbri npm package, not published.
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tenbri-core.workspace = true
+tenbri-keys.workspace = true
+tenbri-store = { workspace = true, features = ["s3"] }
+tenbri-writer.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

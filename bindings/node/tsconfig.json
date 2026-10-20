@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "module": "nodenext",
+    "target": "es2022",
+    "types": ["node"],
+    "skipLibCheck": false
+  },
+  "include": ["__test__/*.mts", "tenbri.d.ts"]
+}
