@@ -172,7 +172,7 @@ for (const interruptMode of ['batched', 'per_call'] as const) {
     const refused = es.filter((e) => e.status === 'refused')
     if (interruptMode === 'batched') {
       assert.equal(es.filter((e) => e.phase === 'intent' && e.approval).length, 2)
-      assert.deepEqual(ran, ['ch_1', 'ch_2'])
+      assert.deepEqual([...ran].sort(), ['ch_1', 'ch_2']) // the two calls run in parallel
     } else {
       assert.equal(refused.length, 1)
       assert.deepEqual(refused[0].principal, { kind: 'agent', id: 'support' })
