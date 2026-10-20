@@ -1,6 +1,6 @@
 [package]
 name = "tenbri"
-description = "Tamper-evident log of AI agent decisions: the facade crate that re-exports the Tenbri API."
+description = "Tamper-evident record of AI agent decisions: the facade crate that re-exports the Tenbri API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

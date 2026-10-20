@@ -11,8 +11,8 @@
   <a href="https://github.com/tenbri/tenbri/actions/workflows/ci.yml"><img src="https://github.com/tenbri/tenbri/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
-Tenbri is an open-source, tamper-evident log of what AI agents decided: who acted, under which rule
-and policy version, from which inputs, and who approved. It is written in Rust, stores plain files
+Tenbri is an open-source, tamper-evident record of what AI agents decided: who acted, under which
+rule and policy version, from which inputs, and who approved. It is written in Rust, stores plain files
 on a local disk or an object store, and verifies offline against a trust root the verifier controls.
 It works on its own, with any agent framework, from Rust, Python, Node, the browser (WASM), the
 `tenbri` CLI or the `tenbrid` REST and gRPC API.
@@ -35,9 +35,29 @@ it, or who signed off.
 - **A prompt injection makes an agent act.** There is no record of what the agent read that led to
   the action.
 
-Regulation is moving the same way: the EU AI Act (Article 12) asks for automatic record-keeping for
-high-risk systems, GDPR Article 22 for human review of automated decisions, and DORA, NIS2, SOC 2 and
-ISO 27001 for evidence of control.
+Regulation is moving the same way. Tenbri gives you the records these ask for; it does not make a
+system compliant on its own.
+
+- **EU AI Act** [Article 12](https://artificialintelligenceact.eu/article/12/),
+  [Article 19](https://artificialintelligenceact.eu/article/19/) and
+  [Article 26](https://artificialintelligenceact.eu/article/26/): automatic logs over a high-risk
+  system's lifetime, kept at least six months. Tenbri keeps every decision signed and chained, on
+  storage you control.
+- **EU AI Act** [Article 14](https://artificialintelligenceact.eu/article/14/): human oversight.
+  Approvals and overrides are their own signed entries.
+- **GDPR** [Article 22](https://gdpr-info.eu/art-22-gdpr/): human review of automated decisions and
+  the means to contest them. Each decision names its inputs, rule and approver; personal data can be
+  erased without breaking the chain.
+- [**DORA**](https://eur-lex.europa.eu/eli/reg/2022/2554/oj) and
+  [**NIS2**](https://eur-lex.europa.eu/eli/dir/2022/2555/oj): incident reporting and evidence of
+  control. A timeline of what agents did that no one could edit afterwards.
+- [**SOC 2**](https://www.aicpa-cima.com/topic/audit-assurance/audit-and-assurance-greater-than-soc-2),
+  [**ISO/IEC 27001**](https://www.iso.org/standard/27001) and
+  [**ISO/IEC 42001**](https://www.iso.org/standard/42001): evidence that controls work. Receipts an
+  auditor verifies offline, without access to your systems.
+- [**NIST AI RMF**](https://www.nist.gov/itl/ai-risk-management-framework): traceability and
+  accountability of AI decisions. Who acted, under which policy version, and the trace that
+  produced it.
 
 ## Why not just logs?
 
@@ -62,7 +82,7 @@ trace that produced them (OpenTelemetry trace and span ids).
 
 **Pre-release: `0.1.0-alpha.1` is out; nothing here is ready for production yet.** The code lands
 on the way to v0.1.0 through `0.1.0-alpha`, `-beta` and `-rc` pre-releases
-([CONTRIBUTING.md](CONTRIBUTING.md#releases)). Logs written by pre-releases are not covered by the
+([CONTRIBUTING.md](CONTRIBUTING.md#releases)). Records written by pre-releases are not covered by the
 format promise: the format is provisional until its external review ends ([spec/](spec/README.md)).
 
 v0.1.0 ships every feature below, each labelled:
