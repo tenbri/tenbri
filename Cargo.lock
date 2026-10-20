@@ -2509,15 +2509,15 @@ dependencies = [
 
 [[package]]
 name = "tenbri"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-anchor"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-cli"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "clap",
  "serde_json",
@@ -2532,7 +2532,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-core"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "ed25519-dalek",
  "proptest",
@@ -2543,19 +2543,19 @@ dependencies = [
 
 [[package]]
 name = "tenbri-crypt"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-export"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-index"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-keys"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "getrandom 0.4.3",
  "keyring",
@@ -2567,15 +2567,15 @@ dependencies = [
 
 [[package]]
 name = "tenbri-macros"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-mcp"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-merkle"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "proptest",
  "serde_json",
@@ -2585,7 +2585,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-node"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "napi",
  "napi-build",
@@ -2594,22 +2594,22 @@ dependencies = [
 
 [[package]]
 name = "tenbri-otlp"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-proxy"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-py"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "pyo3",
 ]
 
 [[package]]
 name = "tenbri-schema"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -2619,7 +2619,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-server"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "axum",
  "clap",
@@ -2649,7 +2649,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-store"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "async-trait",
  "fs4",
@@ -2662,26 +2662,26 @@ dependencies = [
 
 [[package]]
 name = "tenbri-stream"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-testkit"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-tiles"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "tenbri-wasm"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "wasm-bindgen",
 ]
 
 [[package]]
 name = "tenbri-writer"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "getrandom 0.4.3",
  "serde_json",
