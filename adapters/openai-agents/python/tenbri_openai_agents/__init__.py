@@ -153,7 +153,8 @@ class TenbriRecorder(RunHooks[Any]):
         theirs = base.tool_error_formatter
 
         def formatter(args: ToolErrorFormatterArgs[Any]) -> str | Awaitable[str | None] | None:
-            if args.kind == "tool_exception":
+            # str(): openai-agents 0.23 has no tool_exception kind, and no way to tell then.
+            if str(args.kind) == "tool_exception":
                 self._failed.add(args.call_id)
             return theirs(args) if theirs else None
 
