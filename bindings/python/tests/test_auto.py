@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import os
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,27 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     yield
     if tenbri._auto._current is not None:
         tenbri.default().close()
+
+
+# The CLI cargo built in this checkout, if any; TENBRI_BIN names another.
+TENBRI_BIN = os.environ.get("TENBRI_BIN") or str(
+    Path(__file__).resolve().parents[3] / "target" / "debug" / "tenbri"
+)
+
+
+def test_init_records_the_pin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    keys = tmp_path / "keys"
+    monkeypatch.setenv("TENBRI_KEYS", str(keys))
+    d = tenbri.init(tmp_path / "audit")
+    stream = (tmp_path / "audit").resolve()
+    assert (keys / "pins").read_text() == f"{stream} {d.fingerprint}\n"
+    tenbri.init(tmp_path / "audit")  # opening it again records nothing
+    assert (keys / "pins").read_text() == f"{stream} {d.fingerprint}\n"
+    if not os.path.exists(TENBRI_BIN):
+        pytest.skip(f"no tenbri CLI at {TENBRI_BIN}: cargo build -p tenbri-cli")
+    v = subprocess.run([TENBRI_BIN, "verify", str(tmp_path / "audit")], capture_output=True, text=True)
+    assert v.returncode == 0, v
+    assert f"pinned to {d.fingerprint}" in v.stdout
 
 
 def decisions(log: Tenbri) -> list[dict[str, Any]]:

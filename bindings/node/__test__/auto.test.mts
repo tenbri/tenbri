@@ -1,7 +1,8 @@
 // init(), agent() and decision(): the default stream and what it records.
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -27,6 +28,24 @@ beforeEach(async () => {
   } catch {
     // none open
   }
+})
+
+// The CLI cargo built in this checkout, if any; TENBRI_BIN names another.
+const TENBRI_BIN = process.env.TENBRI_BIN || join(import.meta.dirname, '..', '..', '..', 'target', 'debug', 'tenbri')
+
+test('init records the pin, and tenbri verify uses it', async (t) => {
+  const dir = tmp()
+  const keys = join(dir, 'keys')
+  process.env.TENBRI_KEYS = keys
+  const stream = join(dir, 'audit')
+  const d = await init({ stream })
+  const line = `${realpathSync(stream)} ${d.fingerprint}\n`
+  assert.equal(readFileSync(join(keys, 'pins'), 'utf8'), line)
+  await init({ stream }) // opening it again records nothing
+  assert.equal(readFileSync(join(keys, 'pins'), 'utf8'), line)
+  if (!existsSync(TENBRI_BIN)) return t.skip(`no tenbri CLI at ${TENBRI_BIN}: cargo build -p tenbri-cli`)
+  const out = execFileSync(TENBRI_BIN, ['verify', stream], { encoding: 'utf8' }) // throws unless exit 0
+  assert.match(out, new RegExp(`pinned to ${d.fingerprint}`))
 })
 
 async function decisions(log: Tenbri): Promise<Entry[]> {

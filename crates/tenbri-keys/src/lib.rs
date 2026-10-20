@@ -165,6 +165,44 @@ pub fn default_dir() -> Option<PathBuf> {
     config.map(|c| c.join("tenbri").join("keys"))
 }
 
+/// The file in a keys directory recording the fingerprints of the streams created on this machine,
+/// one `<location> <fingerprint>` per line, like ssh's known_hosts.
+pub const PINS: &str = "pins";
+
+/// A stream's location as the pins file records it: an absolute path, or the URL as given.
+pub fn pin_location(location: &str) -> String {
+    if tenbri_store::is_url(location) {
+        return location.to_owned();
+    }
+    fs::canonicalize(location).map_or_else(|_| location.to_owned(), |p| p.display().to_string())
+}
+
+/// Records `fingerprint` as the pin of the stream at `location` in `keys_dir`'s pins file, and
+/// returns that file. The error names the file.
+pub fn record_pin(keys_dir: &Path, location: &str, fingerprint: &str) -> io::Result<PathBuf> {
+    let pins = keys_dir.join(PINS);
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&pins)
+        .and_then(|mut f| writeln!(f, "{} {fingerprint}", pin_location(location)))
+        .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", pins.display())))?;
+    Ok(pins)
+}
+
+/// The fingerprint recorded for the stream at `location` in `keys_dir`'s pins file, with that
+/// file. The last pin wins: a stream re-created at the same place is pinned anew.
+pub fn recorded_pin(keys_dir: &Path, location: &str) -> Option<(String, PathBuf)> {
+    let pins = keys_dir.join(PINS);
+    let loc = pin_location(location);
+    let text = fs::read_to_string(&pins).ok()?;
+    let fp = text.lines().rev().find_map(|l| {
+        let (at, fp) = l.rsplit_once(' ')?;
+        (at == loc).then(|| fp.to_owned())
+    })?;
+    Some((fp, pins))
+}
+
 /// Refuses a keys directory inside the stream's directory, or the other way round: keys never live
 /// under the stream root, so whoever can read or copy the log cannot sign as it.
 pub fn check_apart(keys_dir: &Path, stream_dir: &Path) -> io::Result<()> {
@@ -425,6 +463,33 @@ mod keychain {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn records_pins_and_the_last_one_wins() {
+        let tmp = std::env::temp_dir().join(format!("tenbri-pins-{}", std::process::id()));
+        let (keys, stream) = (tmp.join("keys"), tmp.join("stream"));
+        fs::create_dir_all(&keys).unwrap();
+        fs::create_dir_all(&stream).unwrap();
+        let s = stream.display().to_string();
+        assert_eq!(recorded_pin(&keys, &s), None);
+        let file = record_pin(&keys, &s, "sha256:aa").unwrap();
+        record_pin(&keys, "s3://b/p", "sha256:bb").unwrap();
+        record_pin(&keys, &format!("{s}/."), "sha256:cc").unwrap();
+        let abs = fs::canonicalize(&stream).unwrap().display().to_string();
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            format!("{abs} sha256:aa\ns3://b/p sha256:bb\n{abs} sha256:cc\n")
+        );
+        assert_eq!(recorded_pin(&keys, &s), Some(("sha256:cc".into(), file)));
+        assert_eq!(recorded_pin(&keys, "s3://b/p").unwrap().0, "sha256:bb");
+        assert_eq!(recorded_pin(&keys, "s3://b/q"), None);
+        let err = record_pin(&tmp.join("none"), &s, "sha256:aa").unwrap_err();
+        assert!(
+            err.to_string()
+                .starts_with(&tmp.join("none").join(PINS).display().to_string())
+        );
+        fs::remove_dir_all(&tmp).unwrap();
+    }
 
     #[test]
     fn stores_loads_and_refuses_keys_under_the_stream() {

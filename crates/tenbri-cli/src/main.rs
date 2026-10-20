@@ -3,7 +3,8 @@
 //! Exit codes, stable from 0.1.0: 0 success; 1 the stream does not verify, or does not match the
 //! `--checkpoint` given (truncated behind it, rewritten, or not signed by the stream); the first
 //! broken sequence number is printed; 2 any other error, a malformed checkpoint file among them;
-//! 3 `verify` without `--key` or a pin `init` recorded: the stream is consistent with its own
+//! 3 `verify` without `--key` or a pin recorded when the stream was created here (`init`, or an
+//! SDK's `init()`): the stream is consistent with its own
 //! genesis key, which proves nothing about who wrote it; `schema check` exits 1 when an entry
 //! breaks its action's schema; `receipt verify` exits 1 when the receipt does not verify, with the
 //! reason.
@@ -135,7 +136,7 @@ enum Command {
         /// [STREAM] SEQ|ID: the stream may come from TENBRI_STREAM instead.
         #[arg(required = true, num_args = 1..=2, value_name = "STREAM] [SEQ|ID")]
         args: Vec<String>,
-        /// Fingerprint of the stream's genesis key [default: the pin `tenbri init` recorded].
+        /// Fingerprint of the stream's genesis key [default: the pin `tenbri init` or an SDK's init() recorded].
         #[arg(long, value_name = "FINGERPRINT")]
         key: Option<String>,
         /// One JSON object per entry of the chain, as when stdout is not a terminal.
@@ -1128,20 +1129,8 @@ fn genesis(first: &Entry) -> Option<String> {
     }
 }
 
-/// Where `tenbri init` records the fingerprints of the streams it created, one `<location>
-/// <fingerprint>` per line, like ssh's known_hosts.
-const PINS: &str = "pins";
-
-/// A stream's location as pins records it: an absolute path, or the URL as given.
-fn location(path: &str) -> String {
-    if tenbri_store::is_url(path) {
-        return path.to_owned();
-    }
-    std::fs::canonicalize(path).map_or_else(|_| path.to_owned(), |p| p.display().to_string())
-}
-
-/// The fingerprint to check `path` against: `--key`, else the pin `tenbri init` recorded for it,
-/// with the pins file it came from.
+/// The fingerprint to check `path` against: `--key`, else the pin recorded when the stream was
+/// created here, with the pins file it came from.
 fn resolve_pin(
     key: Option<&str>,
     path: &str,
@@ -1150,23 +1139,12 @@ fn resolve_pin(
     if let Some(k) = key {
         return Ok((Some(pin(k)?), None));
     }
-    let Some(file) = keys
+    let found = keys
         .map(Path::to_owned)
         .or_else(tenbri_keys::default_dir)
-        .map(|d| d.join(PINS))
-    else {
-        return Ok((None, None));
-    };
-    let loc = location(path);
-    // The last pin wins: a stream re-created at the same place is pinned anew.
-    let found = std::fs::read_to_string(&file).ok().and_then(|text| {
-        text.lines().rev().find_map(|l| {
-            let (at, fp) = l.rsplit_once(' ')?;
-            (at == loc).then(|| fp.to_owned())
-        })
-    });
+        .and_then(|d| tenbri_keys::recorded_pin(&d, path));
     match found {
-        Some(fp) => Ok((Some(pin(&fp)?), Some(file))),
+        Some((fp, file)) => Ok((Some(pin(&fp)?), Some(file))),
         None => Ok((None, None)),
     }
 }
@@ -1300,13 +1278,8 @@ async fn init(path: &str, keys: &Path, backend: Backend) -> Result<u8, Fail> {
     ks.save(&stream_key, backend)?;
     ks.save(&session, backend)?;
     Writer::create(store, &stream_key, session).await?;
-    let pins = keys.join(PINS);
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&pins)
-        .and_then(|mut f| writeln!(f, "{} {}", location(path), stream_key.fingerprint()))
-        .map_err(|e| Fail(2, format!("{}: {e}", pins.display())))?;
+    let pins = tenbri_keys::record_pin(keys, path, &stream_key.fingerprint())
+        .map_err(|e| Fail(2, e.to_string()))?;
     println!("created stream {id} at {path}");
     println!(
         "stream key fingerprint (pin it): {}",

@@ -468,7 +468,8 @@ impl Filter {
     }
 }
 
-/// Creates the stream at `location` and its keys, unless there is one: as `tenbri init` does.
+/// Creates the stream at `location` and its keys, unless there is one, and records its pin in
+/// `<keys>/pins`: as `tenbri init` does.
 async fn create(location: &str, keys: Option<&Path>) -> Result<(), Error> {
     if !tenbri_store::is_url(location) {
         let dir = Path::new(location);
@@ -503,6 +504,8 @@ async fn create(location: &str, keys: Option<&Path>) -> Result<(), Error> {
     ks.save(&stream_key, Backend::File)?;
     ks.save(&session, Backend::File)?;
     Writer::create(store, &stream_key, session).await?;
+    // As `tenbri init` does, so `tenbri verify` on this machine needs no --key.
+    tenbri_keys::record_pin(keys, location, &stream_key.fingerprint())?;
     Ok(())
 }
 
