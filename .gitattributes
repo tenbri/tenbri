@@ -9,3 +9,6 @@ crates/tenbri-server/src/proto.rs text eol=lf
 
 # RFC 3161 fixtures: a token is over these exact bytes.
 crates/tenbri-anchor/tests/fixtures/** -text
+
+# Tenbri UI, built from ui/ (pnpm --dir ui build) and checked by CI: no diff noise.
+crates/tenbri-server/src/ui/index.html linguist-generated=true -diff

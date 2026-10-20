@@ -128,9 +128,16 @@ pub(crate) async fn serve(
     listener: TcpListener,
     stop: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    axum::serve(listener, api().0.with_state(daemon))
+    let app = api().0.route("/", axum::routing::get(ui));
+    axum::serve(listener, app.with_state(daemon))
         .with_graceful_shutdown(stop)
         .await
+}
+
+/// Tenbri UI, read-only: one page, built from ui/ (pnpm build), that reads the API with the token
+/// its user types in.
+async fn ui() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("ui/index.html"))
 }
 
 /// The caller, from `Authorization: Bearer <token>`.
