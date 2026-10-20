@@ -1,6 +1,6 @@
 {
   "name": "@tenbri/wasm",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "The Tenbri verifier for browsers, compiled to WebAssembly.",
   "license": "Apache-2.0",
   "repository": {
