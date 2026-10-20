@@ -39,10 +39,17 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       PR: ${{ github.event.pull_request.number }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
     steps:
       - name: Conventional Commits and sign-off
         run: |
-          # Merges, reverts and bots' commits (Dependabot, Release Please) are not held to it.
+          # Merges, reverts and bots' commits (Dependabot) are not held to it, nor the release pull
+          # request: Release Please writes its commits with a maintainer's token (release-please.yml).
+          if [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ] && [[ "$HEAD_REF" == release-please--* ]]; then
+            echo "The release pull request: its commits are Release Please's."
+            exit 0
+          fi
           pattern='^(feat|fix|perf|refactor|docs|test|build|ci|chore|style|revert)(\([a-z0-9./_-]+\))?!?: .+'
           bad=0
           # shellcheck disable=SC2016 # $email is jq's, not the shell's
