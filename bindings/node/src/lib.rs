@@ -32,6 +32,12 @@ pub fn new_id() -> Result<String> {
     tenbri_bindings::new_id().map_err(err)
 }
 
+/// The action schemas of the `tenbri.toml` at `path`, as JSON.
+#[napi]
+pub fn schemas(path: String) -> Result<String> {
+    tenbri_bindings::schemas(std::path::Path::new(&path)).map_err(err)
+}
+
 #[napi(object)]
 pub struct OpenOptions {
     pub keys: Option<String>,
@@ -71,6 +77,17 @@ impl Stream {
     #[napi(getter)]
     pub fn writable(&self) -> bool {
         self.0.writable()
+    }
+
+    /// The keyed digest of `content` under `subject`'s data key (the tenant's without one) from
+    /// this machine's key store.
+    #[napi]
+    pub fn digest(
+        &self,
+        subject: Option<String>,
+        content: napi::bindgen_prelude::Buffer,
+    ) -> Result<String> {
+        self.0.digest(subject.as_deref(), &content).map_err(err)
     }
 
     #[napi]

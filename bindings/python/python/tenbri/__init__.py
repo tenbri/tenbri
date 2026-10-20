@@ -1,5 +1,17 @@
 """Audit trail for AI agents: every decision signed, chained and provable.
 
+    import tenbri
+
+    tenbri.init()  # TENBRI_STREAM, TENBRI_AGENT; the stream and its keys are made on first use
+
+    @tenbri.decision("issue_refund", target="stripe:{charge}", policy="policy:refund@14")
+    def refund(charge: str, amount: int) -> None: ...
+
+    tenbri.instrument_claude_agent_sdk()  # or instrument_openai_agents(), instrument_langchain()
+
+The rest of this module is the lower level those are built on: open a stream yourself, and record
+runs and decisions on it.
+
 ``Tenbri`` blocks; ``AsyncTenbri`` never blocks the event loop. Both write through the same Rust
 core as the ``tenbri`` CLI and tenbrid: an intent is durable before the action runs, every intent
 ends in an outcome, and anyone holding the stream key's fingerprint can verify the record offline.
@@ -44,6 +56,7 @@ __version__: str = _native.__version__
 
 __all__ = [
     "AsyncDecision",
+    "Default",
     "AsyncRun",
     "AsyncTenbri",
     "Broken",
@@ -66,6 +79,14 @@ __all__ = [
     "TenbriError",
     "VerifyReport",
     "WriteConflictError",
+    "agent",
+    "decision",
+    "default",
+    "describe",
+    "init",
+    "instrument_claude_agent_sdk",
+    "instrument_langchain",
+    "instrument_openai_agents",
     "new_id",
 ]
 
@@ -232,14 +253,14 @@ class _Log:
         """Whether this machine holds the keys to write the stream; else it is open read-only."""
         return self._s.writable
 
-    def digest(self, content: bytes | str) -> str:
-        """The keyed digest of an input, ``hmac-sha256:<hex>``, with the ``digest_key`` given at
-        open: a guessed value cannot be confirmed from the log without the key."""
-        if self._digest_key is None:
-            raise InvalidRequestError(
-                "a digest needs digest_key at open, or pass digest= to read() yourself"
-            )
+    def digest(self, content: bytes | str, *, subject: str | None = None) -> str:
+        """The keyed digest of an input, ``hmac-sha256:<hex>``: a guessed value cannot be
+        confirmed from the log without the key. The key is the ``digest_key`` given at open, else
+        ``subject``'s data key (the tenant's without one) from the local key store beside the
+        stream's keys, made on first use; erasing that key leaves the digest unconfirmable."""
         data = content.encode() if isinstance(content, str) else content
+        if self._digest_key is None:
+            return self._s.digest(subject, data)
         return "hmac-sha256:" + hmac.new(self._digest_key, data, hashlib.sha256).hexdigest()
 
     def _decision_draft(
@@ -589,3 +610,16 @@ class AsyncTenbri(_Log):
 
     async def __aexit__(self, *exc: object) -> None:
         await self.close()
+
+
+from ._auto import (  # noqa: E402  (built on the classes above)
+    Default,
+    agent,
+    decision,
+    default,
+    describe,
+    init,
+    instrument_claude_agent_sdk,
+    instrument_langchain,
+    instrument_openai_agents,
+)

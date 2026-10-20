@@ -103,6 +103,12 @@ fn new_id(py: Python<'_>) -> PyResult<String> {
     tenbri_bindings::new_id().map_err(|e| raise(py, e))
 }
 
+/// The action schemas of the `tenbri.toml` at `path`, as JSON.
+#[pyfunction]
+fn schemas(py: Python<'_>, path: PathBuf) -> PyResult<String> {
+    tenbri_bindings::schemas(&path).map_err(|e| raise(py, e))
+}
+
 fn options(keys: Option<PathBuf>, key: Option<String>, create: bool) -> Options {
     Options { keys, key, create }
 }
@@ -157,6 +163,11 @@ impl Stream {
     #[getter]
     fn writable(&self) -> bool {
         self.0.writable()
+    }
+
+    #[pyo3(signature = (subject, content))]
+    fn digest(&self, py: Python<'_>, subject: Option<&str>, content: &[u8]) -> PyResult<String> {
+        self.0.digest(subject, content).map_err(|e| raise(py, e))
     }
 
     fn append(&self, py: Python<'_>, draft: String) -> PyResult<String> {
@@ -265,6 +276,7 @@ fn tenbri_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<Stream>()?;
     m.add_function(wrap_pyfunction!(new_id, m)?)?;
+    m.add_function(wrap_pyfunction!(schemas, m)?)?;
     m.add_function(wrap_pyfunction!(_resolve, m)?)?;
     Ok(())
 }
