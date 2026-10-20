@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.0-beta.1](https://github.com/tenbri/tenbri/compare/v0.1.0-alpha.2...v0.1.0-beta.1) (2026-10-20)
+
+
+### Features
+
+* **adapters:** Claude Agent SDK adapter for Python and TypeScript ([#42](https://github.com/tenbri/tenbri/issues/42)) ([af23ddd](https://github.com/tenbri/tenbri/commit/af23dddb97351cbfec2bc1d9d3e763f58b1a7488))
+* **adapters:** LangGraph and LangChain adapter for Python and TypeScript ([#44](https://github.com/tenbri/tenbri/issues/44)) ([8598018](https://github.com/tenbri/tenbri/commit/8598018a353672893bde0aaae8b60e13099d501e))
+* **adapters:** OpenAI Agents SDK adapter for Python and TypeScript ([#43](https://github.com/tenbri/tenbri/issues/43)) ([d183079](https://github.com/tenbri/tenbri/commit/d1830790365633484d5c592b7dc45d210feb7101))
+* **crypt:** encrypted body blobs, keyed digests and erasure ([#36](https://github.com/tenbri/tenbri/issues/36)) ([9ae88c9](https://github.com/tenbri/tenbri/commit/9ae88c9de709279c2b6858804748966e1e2090d4))
+* index and query for 0.1.0-beta.1 ([#40](https://github.com/tenbri/tenbri/issues/40)) ([fc90a69](https://github.com/tenbri/tenbri/commit/fc90a69dadfe28ae1c69d5d68622c4c63695a900))
+* **index:** erasure reaches the query index ([#41](https://github.com/tenbri/tenbri/issues/41)) ([5c2545f](https://github.com/tenbri/tenbri/commit/5c2545f1a82675b12651d155d9b60774cd50d22a))
+* Python, Node and WASM bindings for 0.1.0-beta.1 ([#39](https://github.com/tenbri/tenbri/issues/39)) ([975023a](https://github.com/tenbri/tenbri/commit/975023a204befcd2768dc2845aaeb9706aa3379a))
+* receipts and RFC 3161 timestamps of checkpoints ([#38](https://github.com/tenbri/tenbri/issues/38)) ([98a39bd](https://github.com/tenbri/tenbri/commit/98a39bd0f2b8573828114ee8681a193e65da2d9a))
+* test kit and OpenTelemetry correlation for 0.1.0-beta.1 ([#37](https://github.com/tenbri/tenbri/issues/37)) ([f866919](https://github.com/tenbri/tenbri/commit/f866919b6c3b759e734d4b22281f20c36fe29bc5))
+
+
+### Documentation
+
+* add fleet and liveness to the README roadmap ([#33](https://github.com/tenbri/tenbri/issues/33)) ([2bf1755](https://github.com/tenbri/tenbri/commit/2bf17552ca84a15f258b507434e59f2a90dbc5f3))
+
+
+### CI
+
+* publish the framework adapters, and start 0.1.0-beta.1 ([#45](https://github.com/tenbri/tenbri/issues/45)) ([d2b0ed1](https://github.com/tenbri/tenbri/commit/d2b0ed15d4aa9acadf619264dbeee32ce793ac6d))
+
 ## [0.1.0-alpha.2](https://github.com/tenbri/tenbri/compare/v0.1.0-alpha.1...v0.1.0-alpha.2) (2026-10-20)
 
 
