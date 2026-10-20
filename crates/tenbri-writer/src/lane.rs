@@ -8,7 +8,7 @@ use tenbri_store::Store;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, timeout, timeout_at};
 
-use crate::{Hook, RECONCILE_AFTER_MS, WriteError, Writer, as_intent, now_ms, outcome_of};
+use crate::{Hook, RECONCILE_AFTER_MS, WriteError, Writer, as_intent, outcome_of};
 
 /// How long the lane waits for an append before it calls [`Writer::tick`].
 const TICK: Duration = Duration::from_secs(1);
@@ -89,7 +89,22 @@ impl Lane {
 
     /// Appends `entries` together, in order, in one queue slot; returns each entry as stored, or
     /// why it was not (see [`Writer::append_batch`]).
-    pub async fn append_batch(&self, entries: Vec<Entry>) -> Vec<Result<Entry, WriteError>> {
+    pub async fn append_batch(
+        &self,
+        #[allow(unused_mut)] mut entries: Vec<Entry>,
+    ) -> Vec<Result<Entry, WriteError>> {
+        #[cfg(feature = "otel")]
+        let span = {
+            crate::traced(&mut entries);
+            tenbri_otlp::Append::start(entries.len())
+        };
+        let out = self.send(entries).await;
+        #[cfg(feature = "otel")]
+        span.end(&out);
+        out
+    }
+
+    async fn send(&self, entries: Vec<Entry>) -> Vec<Result<Entry, WriteError>> {
         let n = entries.len();
         let fail = |e: WriteError| (0..n).map(|_| Err(e.again())).collect();
         let (done, rx) = oneshot::channel();
@@ -168,7 +183,9 @@ async fn run<S: Store, H: Hook<S>>(
             Some(after) if !entries.is_empty() => {
                 let keep: HashSet<&str> =
                     entries.iter().filter_map(|e| e.intent.as_deref()).collect();
-                w.stale_intents(now_ms(), after.as_millis() as i64, |id| keep.contains(id))
+                w.stale_intents(w.clock.now_ms(), after.as_millis() as i64, |id| {
+                    keep.contains(id)
+                })
             }
             _ => vec![],
         };
@@ -179,7 +196,7 @@ async fn run<S: Store, H: Hook<S>>(
         let mut results = if entries.is_empty() {
             vec![]
         } else {
-            w.append_batch(entries).await
+            w.append_entries(entries).await
         }
         .into_iter()
         .skip(skip);

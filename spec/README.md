@@ -15,6 +15,8 @@ with no Tenbri binary at all.
   consistency proofs, checkpoints as C2SP signed notes, and verifying a stream against one.
 - [receipts.md](receipts.md): receipts, self-contained proofs that entries are in a stream,
   checked offline against a pinned key, and RFC 3161 timestamps of checkpoints.
+- [privacy.md](privacy.md): encrypted body blobs, keyed input digests, data keys and their epochs,
+  erasure, and the local key store.
 - [vectors/](vectors/README.md): the conformance test vectors.
 
 ## Versioning

@@ -78,6 +78,14 @@ paths:
         required: true
         schema:
           type: string
+      - name: traceparent
+        in: header
+        description: 'W3C Trace Context: the entry''s `trace` (trace and span id) unless the draft has one'
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
       requestBody:
         description: 'A draft approval: `action` approved, by the token''s principal.'
         content:
@@ -192,6 +200,14 @@ paths:
         required: true
         schema:
           type: string
+      - name: traceparent
+        in: header
+        description: 'W3C Trace Context: the `trace` of every draft without one'
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
       requestBody:
         content:
           application/json:
@@ -299,6 +315,14 @@ paths:
         required: true
         schema:
           type: string
+      - name: traceparent
+        in: header
+        description: 'W3C Trace Context: the entry''s `trace` (trace and span id) unless the draft has one'
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
       requestBody:
         description: 'A draft intent (spec/format-v1.md): action, inputs, rule, subject, approval, trace, links, ext... `kind` and `phase` may be left out; `principal` defaults to the token''s; `source` to sdk; `durability` to local.'
         content:
@@ -344,6 +368,14 @@ paths:
         required: true
         schema:
           type: string
+      - name: traceparent
+        in: header
+        description: 'W3C Trace Context: the entry''s `trace` (trace and span id) unless the draft has one'
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
       requestBody:
         description: 'A draft outcome: `intent` (the intent''s id) and `status` (ok, error, refused, unknown). `principal`, `action`, `subject` and `source` default to the intent''s.'
         content:

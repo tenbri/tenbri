@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use clap::{Parser, Subcommand};
-use tenbri_core::{Entry, Head, Role, canon, sign};
+use clap::{Args, Parser, Subcommand};
+use tenbri_core::{Entry, Head, Principal, PrincipalKind, Role, canon, sign};
+use tenbri_crypt::{DataKeys, epoch_note, erasure_note};
 use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
 use tenbri_merkle::{Note, checkpoint};
 use tenbri_schema::{Schemas, Unknown};
@@ -103,6 +104,65 @@ enum Command {
     Schema {
         #[command(subcommand)]
         command: SchemaCommand,
+    },
+    /// Delete a subject's data keys, so its bodies and input digests can no longer be read or
+    /// confirmed, and record the erasure in the stream. The chain, checkpoints and receipts still
+    /// verify.
+    Erase {
+        path: String,
+        #[command(flatten)]
+        who: Who,
+        /// Why: a reference such as the request id (dsr:2026-1042), recorded in the erasure note.
+        #[arg(long)]
+        reason: String,
+        /// Who asked for it, recorded as the note's principal (a person id).
+        #[arg(long, value_name = "ID")]
+        by: Option<String>,
+        /// Do not ask for confirmation.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// The stream's signing keys and data keys.
+    Keys {
+        #[command(subcommand)]
+        command: KeysCommand,
+    },
+}
+
+/// Whose data keys: a subject's, or the tenant's (entries without a subject).
+#[derive(Args)]
+#[group(required = true, multiple = false)]
+struct Who {
+    /// The subject handle.
+    #[arg(long, value_name = "HANDLE")]
+    subject: Option<String>,
+    /// The tenant's keys, used by entries without a subject.
+    #[arg(long)]
+    tenant: bool,
+}
+
+#[derive(Subcommand)]
+enum KeysCommand {
+    /// List the signing keys and the data keys (subjects and key epochs); never a secret.
+    List { path: String },
+    /// Print a subject's data keys as JSON, for a backup kept apart from the log.
+    Export {
+        path: String,
+        #[command(flatten)]
+        who: Who,
+        /// Only the digest keys: enough to confirm input digests, never to open a body.
+        #[arg(long)]
+        digest: bool,
+    },
+    /// Start a new data key epoch for a subject and record it in the stream; older epochs keep
+    /// opening older data until erased.
+    Rotate {
+        path: String,
+        #[command(flatten)]
+        who: Who,
+        /// Who rotated, recorded as the note's principal (a person id).
+        #[arg(long, value_name = "ID")]
+        by: Option<String>,
     },
 }
 
@@ -356,6 +416,36 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
         Command::Schema {
             command: SchemaCommand::Check { paths, schema },
         } => schema_check(schema, paths).await,
+        Command::Erase {
+            path,
+            who,
+            reason,
+            by,
+            yes,
+        } => erase(path, &keys_dir()?, who.subject.as_deref(), reason, by, *yes).await,
+        Command::Keys { command } => match command {
+            KeysCommand::List { path } => keys_list(path, &keys_dir()?).await,
+            KeysCommand::Export { path, who, digest } => {
+                let (_, ks) = open_stream(path, &keys_dir()?).await?;
+                let json = DataKeys::open(&ks)?.export(who.subject.as_deref(), *digest)?;
+                println!("{}", *json);
+                Ok(0)
+            }
+            KeysCommand::Rotate { path, who, by } => {
+                let (store, ks) = open_stream(path, &keys_dir()?).await?;
+                let data = DataKeys::open(&ks)?;
+                let mut w = open_writer(store, ks).await?;
+                let subject = who.subject.as_deref();
+                let n = data.rotate(subject)?;
+                let e = w.append(epoch_note(subject, n, person(by))).await?;
+                println!(
+                    "{}: new data key epoch {n}, recorded at seq {}",
+                    whose(subject),
+                    e.seq
+                );
+                Ok(0)
+            }
+        },
     }
 }
 
@@ -429,7 +519,8 @@ fn kind(e: &Entry) -> String {
 }
 
 async fn checkpoint(path: &str, keys: &Path, tsa: Option<&str>) -> Result<u8, Fail> {
-    let mut w = open_writer(path, keys).await?;
+    let (store, ks) = open_stream(path, keys).await?;
+    let mut w = open_writer(store, ks).await?;
     let size = w.checkpoint().await?;
     println!("checkpoint at size {size}: {}", checkpoint::key(size));
     let Some(url) = tsa else { return Ok(0) };
@@ -447,6 +538,95 @@ async fn checkpoint(path: &str, keys: &Path, tsa: Option<&str>) -> Result<u8, Fa
     let tsr = tenbri_anchor::timestamp(url, text.as_bytes()).await?;
     w.store().put_if_absent(&anchor, &tsr).await?;
     println!("timestamped by {url}: {anchor}");
+    Ok(0)
+}
+
+fn whose(subject: Option<&str>) -> String {
+    subject.map_or("tenant".into(), |s| format!("subject {s}"))
+}
+
+fn person(by: &Option<String>) -> Option<Principal> {
+    by.as_ref().map(|id| Principal {
+        kind: PrincipalKind::Person,
+        id: id.clone(),
+    })
+}
+
+async fn erase(
+    path: &str,
+    keys: &Path,
+    subject: Option<&str>,
+    reason: &str,
+    by: &Option<String>,
+    yes: bool,
+) -> Result<u8, Fail> {
+    let (store, ks) = open_stream(path, keys).await?;
+    let data = DataKeys::open(&ks)?;
+    // Open the writer first: a stream that does not verify, or no key to sign with, stops here,
+    // before anything is deleted.
+    let mut w = open_writer(store, ks).await?;
+    if !yes {
+        let answer = subject.unwrap_or("tenant");
+        eprint!(
+            "This deletes the data keys of {} in {}: its bodies and input digests can never be read \
+             or confirmed again. Type {answer} to confirm: ",
+            whose(subject),
+            data.dir().display()
+        );
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        if line.trim_end_matches(['\r', '\n']) != answer {
+            return Err(Fail(2, "not confirmed; nothing was erased".into()));
+        }
+    }
+    let n = data.erase(subject)?;
+    let e = w
+        .append(erasure_note(subject, reason, person(by)))
+        .await
+        .map_err(|e| {
+            Fail(
+                2,
+                format!(
+                    "deleted {n} data key epochs of {}, but the erasure note was not written: {e}; \
+                     run tenbri erase again to record it",
+                    whose(subject)
+                ),
+            )
+        })?;
+    println!(
+        "erased {}: {n} data key epochs deleted; erasure recorded at seq {}",
+        whose(subject),
+        e.seq
+    );
+    Ok(0)
+}
+
+async fn keys_list(path: &str, keys: &Path) -> Result<u8, Fail> {
+    let (_, ks) = open_stream(path, keys).await?;
+    println!("signing keys of {} ({}):", ks.stream(), ks.dir().display());
+    for m in ks.list()? {
+        let role = match m.role {
+            Role::Stream => "stream",
+            Role::Session => "session",
+        };
+        let until = m
+            .not_after
+            .map(|t| format!(" until {t}"))
+            .unwrap_or_default();
+        println!("  {} {role} {}{until}", m.id, m.public);
+    }
+    let data = DataKeys::open(&ks)?;
+    println!("data keys ({}):", data.dir().display());
+    for h in data.list()? {
+        let (first, last) = (&h.epochs[0], &h.epochs[h.epochs.len() - 1]);
+        println!(
+            "  {}: epochs {}..{}, newest made {}",
+            whose(h.subject.as_deref()),
+            first.epoch,
+            last.epoch,
+            last.created
+        );
+    }
     Ok(0)
 }
 
@@ -583,23 +763,8 @@ async fn init(path: &str, keys: &Path, backend: Backend) -> Result<u8, Fail> {
     Ok(0)
 }
 
-async fn append(path: &str, keys: &Path) -> Result<u8, Fail> {
-    let mut input = vec![];
-    io::stdin().read_to_end(&mut input)?;
-    let draft = draft_from_json(&input).map_err(|e| Fail(2, format!("stdin: {e}")))?;
-    let mut w = open_writer(path, keys).await?;
-    let now = now_ms();
-    w.reconcile_stale(now, RECONCILE_AFTER_MS, draft.intent.as_deref())
-        .await?;
-    let e = w.append(draft).await?;
-    println!("{}", line(&e));
-    Ok(0)
-}
-
-/// The stream's writer, pinned to the genesis key this machine holds, checkpointing, with a
-/// session key: a stored one the stream certified, valid for at least another minute, else a new
-/// one certified with the current stream key.
-async fn open_writer(path: &str, keys: &Path) -> Result<Writer<AnyStore, Checkpoints>, Fail> {
+/// The store at `path` and its key store, found from its HEAD.
+async fn open_stream(path: &str, keys: &Path) -> Result<(AnyStore, KeyStore), Fail> {
     let store = store(path).await?;
     let head = store
         .get("HEAD")
@@ -607,28 +772,46 @@ async fn open_writer(path: &str, keys: &Path) -> Result<Writer<AnyStore, Checkpo
         .ok_or_else(|| Fail(2, format!("no stream at {path}")))?;
     let (head, _) = Head::parse(&head.bytes)?;
     let ks = key_store(keys, path, &head.stream)?;
-    // The writer pins the stream to its genesis key as this machine holds it.
-    let metas = ks.list()?;
-    let genesis = metas
+    Ok((store, ks))
+}
+
+/// A writer for the stream, pinned to its genesis key as this machine holds it, with the latest
+/// checkpoint kept with the keys as the HEAD floor, and a session key it may sign with.
+async fn open_writer(store: AnyStore, ks: KeyStore) -> Result<Writer<AnyStore, Checkpoints>, Fail> {
+    let genesis = ks
+        .list()?
         .iter()
         .filter(|m| m.role == Role::Stream)
         .filter_map(|m| sign::decode_key(&m.public).ok())
-        .find(|k| sign::stream_id(k) == head.stream)
+        .find(|k| sign::stream_id(k) == ks.stream())
         .ok_or_else(|| {
             Fail(
                 2,
                 format!(
                     "no stream key for {} in {}",
-                    head.stream,
+                    ks.stream(),
                     ks.dir().display()
                 ),
             )
         })?;
-    // The latest checkpoint is kept with the keys, apart from the stream: the HEAD floor.
     let mut w = Writer::open(store, Some(&sign::fingerprint(&genesis)))
         .await?
         .with_checkpoints(Some(ks.dir().join(CHECKPOINT_FILE)))
         .await?;
     w.use_keys(ks).await?;
     Ok(w)
+}
+
+async fn append(path: &str, keys: &Path) -> Result<u8, Fail> {
+    let mut input = vec![];
+    io::stdin().read_to_end(&mut input)?;
+    let draft = draft_from_json(&input).map_err(|e| Fail(2, format!("stdin: {e}")))?;
+    let (store, ks) = open_stream(path, keys).await?;
+    let mut w = open_writer(store, ks).await?;
+    let now = now_ms();
+    w.reconcile_stale(now, RECONCILE_AFTER_MS, draft.intent.as_deref())
+        .await?;
+    let e = w.append(draft).await?;
+    println!("{}", line(&e));
+    Ok(0)
 }

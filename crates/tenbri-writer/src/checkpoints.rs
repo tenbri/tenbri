@@ -69,7 +69,7 @@ impl<S: Store> Writer<S, Checkpoints> {
         if self.hook.size == size {
             return Ok(size);
         }
-        let key = signer(&self.chain, self.session.as_ref())
+        let key = signer(&self.chain, self.session.as_ref(), self.clock.now_ms())
             .ok_or_else(|| WriteError::NoSession("no session key may sign a checkpoint".into()))?;
         let c = Commit {
             head: &self.head,

@@ -7,7 +7,14 @@
 //! writer between many tasks with group commit and backpressure. A [`Hook`] runs after every HEAD
 //! the writer moves; [`Checkpoints`] is the one that writes signed checkpoints, and
 //! [`Writer::with_checkpoints`] refuses a HEAD older than the latest one. [`verify`] and
-//! [`Reader`] read a stream back; [`receipt`] proves entries of it; [`gc`] removes what crashed writers left.
+//! [`Reader`] read a stream back; [`receipt`] proves entries of it; [`gc`] removes what crashed writers left. A [`Clock`] gives
+//! the writer its time and entry ids (the test kit's is fixed).
+//!
+//! With the `otel` feature, every entry appended without `trace` gets the ids of the
+//! OpenTelemetry span active when [`Writer::append_batch`] or [`Lane::append_batch`] is called,
+//! and appends and [`verify`] emit spans and metrics (`tenbri_otlp::Append`,
+//! `tenbri_otlp::Verify`) through the OpenTelemetry API, which sends nothing unless the
+//! application installs an exporter.
 
 mod checkpoints;
 mod lane;
@@ -17,6 +24,7 @@ mod receipt;
 use std::fmt;
 use std::future::Future;
 use std::io;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use tenbri_core::{
@@ -139,6 +147,27 @@ pub fn new_id(ms: i64) -> io::Result<String> {
     Ok(encoding::ulid(u128::from_be_bytes(r)))
 }
 
+/// Where a writer takes the time and the ids of new entries from: [`SystemClock`] unless set with
+/// [`Writer::create_with_clock`] or [`Writer::with_clock`].
+pub trait Clock: Send + Sync {
+    /// Milliseconds since the Unix epoch.
+    fn now_ms(&self) -> i64;
+    /// A new ULID for `ms`, unique within the stream.
+    fn new_id(&self, ms: i64) -> io::Result<String> {
+        new_id(ms)
+    }
+}
+
+/// The system clock and random ids.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now_ms(&self) -> i64 {
+        now_ms()
+    }
+}
+
 /// An entry draft from JSON (`tenbri append`): canonicalised, duplicate keys and non-integers
 /// rejected, and none of the members the writer fills (`v`, `stream`, `seq`, `prev`, `signer`,
 /// `sig`). `id` and `ts` may be given, for idempotent retries and attestations.
@@ -223,19 +252,30 @@ pub struct Writer<S: Store, H = ()> {
     /// before the next write.
     stale: bool,
     hook: H,
+    clock: Arc<dyn Clock>,
 }
 
 impl<S: Store> Writer<S> {
     /// Creates a stream: the genesis entry certifying `stream_key` (signed by it), then `session`
     /// certified by it. Fails with [`WriteError::Exists`] if the store already holds a stream.
     pub async fn create(store: S, stream_key: &Key, session: Key) -> Result<Writer<S>, WriteError> {
+        Self::create_with_clock(store, stream_key, session, Arc::new(SystemClock)).await
+    }
+
+    /// [`Writer::create`], with entry times and ids from `clock`, then and from now on.
+    pub async fn create_with_clock(
+        store: S,
+        stream_key: &Key,
+        session: Key,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Writer<S>, WriteError> {
         if store.get("HEAD").await?.is_some() {
             return Err(WriteError::Exists);
         }
         let mut e = tenbri_keys::certify(stream_key);
         e.stream = sign::stream_id(&stream_key.signing.verifying_key());
         e.seq = 1;
-        stamp(&mut e)?;
+        stamp(&mut e, &*clock)?;
         let mut w = Writer {
             pin: Some(stream_key.fingerprint()),
             chain: Chain::new(Some(&stream_key.fingerprint())),
@@ -256,6 +296,7 @@ impl<S: Store> Writer<S> {
             hashes: vec![],
             stale: false,
             hook: (),
+            clock,
             store,
         };
         let mut e = fill(e, &w.chain, &stream_key.id);
@@ -301,6 +342,7 @@ impl<S: Store> Writer<S> {
             hashes,
             stale: false,
             hook: (),
+            clock: Arc::new(SystemClock),
         })
     }
 }
@@ -320,7 +362,14 @@ impl<S: Store, H> Writer<S, H> {
             hashes: self.hashes,
             stale: self.stale,
             hook,
+            clock: self.clock,
         }
+    }
+
+    /// The same writer, taking entry times and ids from `clock` from now on.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -355,7 +404,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
             head: &self.head,
             first: self.head.seq + 1,
             hashes: &self.hashes,
-            signer: signer(&self.chain, self.session.as_ref()),
+            signer: signer(&self.chain, self.session.as_ref(), self.clock.now_ms()),
         };
         self.hook.committed(&self.store, commit).await;
     }
@@ -370,7 +419,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
 
     /// With a key store, makes sure the session key is valid for at least [`SESSION_MARGIN_MS`].
     async fn renew_session(&mut self) -> Result<(), WriteError> {
-        let now = now_ms();
+        let now = self.clock.now_ms();
         let Some(keys) = self.keys.clone() else {
             return Ok(());
         };
@@ -426,7 +475,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
         if info.revoked_from.is_some() {
             return Err(WriteError::NoSession(format!("{} is revoked", key.id)));
         }
-        if !key.valid_at(now_ms()) {
+        if !key.valid_at(self.clock.now_ms()) {
             return Err(WriteError::NoSession(format!("{} expired", key.id)));
         }
         self.session = Some(key);
@@ -484,13 +533,33 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
     /// Appends `entries` as one batch, in order, signed by the session key: one put and one HEAD
     /// swap for all of them. Returns each entry as stored, or why it was not: an entry that breaks
     /// a rule is refused alone, a failed write fails all of them.
-    pub async fn append_batch(&mut self, entries: Vec<Entry>) -> Vec<Result<Entry, WriteError>> {
+    pub async fn append_batch(
+        &mut self,
+        #[allow(unused_mut)] mut entries: Vec<Entry>,
+    ) -> Vec<Result<Entry, WriteError>> {
+        #[cfg(feature = "otel")]
+        let span = {
+            traced(&mut entries);
+            tenbri_otlp::Append::start(entries.len())
+        };
+        let out = self.append_entries(entries).await;
+        #[cfg(feature = "otel")]
+        span.end(&out);
+        out
+    }
+
+    /// [`Writer::append_batch`] without the trace and spans: [`Lane`] adds them in the caller's
+    /// task.
+    pub(crate) async fn append_entries(
+        &mut self,
+        entries: Vec<Entry>,
+    ) -> Vec<Result<Entry, WriteError>> {
         if let Err(e) = self.renew_session().await {
             return entries.iter().map(|_| Err(e.again())).collect();
         }
         let session = match &self.session {
             None => Err(WriteError::NoSession("none set".into())),
-            Some(s) if !s.valid_at(now_ms()) => {
+            Some(s) if !s.valid_at(self.clock.now_ms()) => {
                 Err(WriteError::NoSession(format!("{} expired", s.id)))
             }
             Some(s) => Ok(s.clone()),
@@ -592,7 +661,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
             entries.iter().map(|_| None).collect();
         let mut pending = vec![];
         for (i, mut e) in entries.into_iter().enumerate() {
-            match stamp(&mut e) {
+            match stamp(&mut e, &*self.clock) {
                 Ok(()) => pending.push((i, e)),
                 Err(err) => results[i] = Some(Err(err.into())),
             }
@@ -691,7 +760,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
                         head: &self.head,
                         first,
                         hashes: &self.hashes,
-                        signer: signer(&self.chain, self.session.as_ref()),
+                        signer: signer(&self.chain, self.session.as_ref(), self.clock.now_ms()),
                     };
                     self.hook.committed(&self.store, commit).await;
                     return done(pending);
@@ -741,7 +810,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
                     head: &self.head,
                     first: seq,
                     hashes: &self.hashes,
-                    signer: signer(&self.chain, self.session.as_ref()),
+                    signer: signer(&self.chain, self.session.as_ref(), self.clock.now_ms()),
                 };
                 self.hook.committed(&self.store, commit).await;
                 Ok(())
@@ -753,9 +822,9 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
 
 /// `session`, if it may sign a checkpoint of `chain` now: a session key the stream certified, not
 /// revoked, not expired.
-fn signer<'a>(chain: &Chain, session: Option<&'a Key>) -> Option<&'a Key> {
+fn signer<'a>(chain: &Chain, session: Option<&'a Key>, now: i64) -> Option<&'a Key> {
     session.filter(|k| {
-        k.valid_at(now_ms())
+        k.valid_at(now)
             && chain.key(&k.id).is_some_and(|i| {
                 i.role == Role::Session
                     && i.revoked_from.is_none()
@@ -787,11 +856,21 @@ fn outcome_of(intent: &Entry, status: Status) -> Entry {
     }
 }
 
-/// Gives a draft its id and timestamp, unless it has them.
-fn stamp(e: &mut Entry) -> io::Result<()> {
-    let now = now_ms();
+/// Gives every draft without `trace` the ids of the active OpenTelemetry span, if there is one.
+#[cfg(feature = "otel")]
+pub(crate) fn traced(entries: &mut [Entry]) {
+    if let Some(t) = tenbri_otlp::current() {
+        for e in entries.iter_mut().filter(|e| e.trace.is_none()) {
+            e.trace = Some(t.clone());
+        }
+    }
+}
+
+/// Gives a draft its id and timestamp from `clock`, unless it has them.
+fn stamp(e: &mut Entry, clock: &dyn Clock) -> io::Result<()> {
+    let now = clock.now_ms();
     if e.id.is_empty() {
-        e.id = new_id(now)?;
+        e.id = clock.new_id(now)?;
     }
     if e.ts.is_empty() {
         e.ts = encoding::format_ts(now);

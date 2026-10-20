@@ -167,8 +167,8 @@ with their meanings.
   is about the checkpoint it carries. Held outside the operator, that checkpoint catches a later
   rewrite (checkpoints.md, section 4).
 - **The content behind digests and bodies.** Input digests are keyed and bodies are encrypted
-  blobs (format v1, section 4.1); a receipt carries them as they are. Disclosing the inputs and
-  their digest key for one subject is selective disclosure (*reserved*, with the privacy keys).
+  blobs ([privacy.md](privacy.md)); a receipt carries them as they are. Disclosing the inputs and
+  their digest key for one subject alongside a receipt is selective disclosure (*reserved*).
 
 ## 8. Open points
 

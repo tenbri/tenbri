@@ -38,7 +38,8 @@ use std::time::Duration;
 
 use futures_util::{Stream, StreamExt, stream};
 use tenbri_core::{
-    Code, Durability, Entry, Head, Kind, Phase, Principal, Role, Source, canon, encoding, sign,
+    Code, Durability, Entry, Head, Kind, Phase, Principal, Role, Source, Trace, canon, encoding,
+    sign,
 };
 use tenbri_keys::KeyStore;
 use tenbri_merkle::checkpoint;
@@ -277,7 +278,8 @@ impl Daemon {
                 .all(|l| l.writable.load(Ordering::Relaxed))
     }
 
-    /// Appends one draft (a JSON object). `key` is the Idempotency-Key, the entry id.
+    /// Appends one draft (a JSON object). `key` is the Idempotency-Key, the entry id; `trace`,
+    /// from the request's `traceparent`, is the entry's `trace` unless the draft has one.
     pub async fn append(
         &self,
         token: &Token,
@@ -285,6 +287,7 @@ impl Daemon {
         op: Op,
         key: Option<&str>,
         draft: &[u8],
+        trace: Option<&Trace>,
     ) -> Result<Appended, ApiError> {
         let key = key.ok_or_else(|| {
             ApiError::new(
@@ -294,19 +297,20 @@ impl Daemon {
         })?;
         let value = canon::parse(draft)?;
         let mut out = self
-            .commit(token, stream, op, vec![(Some(key), value)])
+            .commit(token, stream, op, vec![(Some(key), value)], trace)
             .await?;
         Ok(out.remove(0))
     }
 
     /// Appends drafts in order, each with its own `id`. Every draft is checked before any is
     /// written; a storage failure part-way leaves the earlier ones written, and retrying the
-    /// whole batch is safe.
+    /// whole batch is safe. `trace` is the `trace` of every draft without one.
     pub async fn append_batch(
         &self,
         token: &Token,
         stream: &str,
         drafts: Vec<canon::Value>,
+        trace: Option<&Trace>,
     ) -> Result<Vec<Appended>, ApiError> {
         if drafts.is_empty() || drafts.len() > MAX_BATCH {
             return Err(ApiError::new(
@@ -315,7 +319,7 @@ impl Daemon {
             ));
         }
         let drafts = drafts.into_iter().map(|d| (None, d)).collect();
-        self.commit(token, stream, Op::Batch, drafts).await
+        self.commit(token, stream, Op::Batch, drafts, trace).await
     }
 
     async fn commit(
@@ -324,6 +328,7 @@ impl Daemon {
         stream: &str,
         op: Op,
         drafts: Vec<(Option<&str>, canon::Value)>,
+        trace: Option<&Trace>,
     ) -> Result<Vec<Appended>, ApiError> {
         let lane = self.lane(token, stream)?.clone();
         let mut entries: Vec<Entry> = vec![];
@@ -334,7 +339,8 @@ impl Daemon {
         // Spawned, so a client that goes away cannot stop the read-back half-way. The lane's
         // queue gives the backpressure: an append waits for room up to the deadline.
         let schemas = self.schemas.clone();
-        tokio::spawn(async move { lane.write(entries, schemas.as_deref()).await })
+        let trace = trace.cloned();
+        tokio::spawn(async move { lane.write(entries, schemas.as_deref(), trace).await })
             .await
             .map_err(|e| ApiError::new(ErrorCode::Internal, e.to_string()))?
     }
@@ -679,6 +685,7 @@ impl Lane {
         &self,
         drafts: Vec<Entry>,
         schemas: Option<&Schemas>,
+        trace: Option<Trace>,
     ) -> Result<Vec<Appended>, ApiError> {
         // The same id again: the original entry if the draft is the same, else a conflict.
         let mut done: Vec<Option<Appended>> = vec![];
@@ -726,7 +733,14 @@ impl Lane {
             .into_iter()
             .zip(&done)
             .filter(|(_, r)| r.is_none())
-            .map(|(d, _)| d)
+            // After the replay check, as `same` takes the stored trace for a draft without one:
+            // a retry comes with a new span.
+            .map(|(mut d, _)| {
+                if d.trace.is_none() {
+                    d.trace.clone_from(&trace);
+                }
+                d
+            })
             .collect();
         let n = new.len();
         let results = self.writer.append_batch(new.clone()).await;
@@ -886,6 +900,9 @@ fn same(draft: &Entry, stored: &Entry) -> bool {
     if d.ts.is_empty() {
         d.ts.clone_from(&stored.ts);
     }
+    if d.trace.is_none() {
+        d.trace.clone_from(&stored.trace);
+    }
     d == *stored
 }
 
@@ -955,6 +972,7 @@ mod tests {
             op,
             Some(&new_id(now_ms()).unwrap()),
             body.as_bytes(),
+            None,
         )
         .await
     }
@@ -1022,7 +1040,10 @@ mod tests {
                 canon::parse(format!(r#"{{"kind":"note","id":"{id}"}}"#).as_bytes()).unwrap()
             })
             .collect();
-        assert_eq!(d.append_batch(&t, "s", drafts).await.unwrap().len(), 1000);
+        assert_eq!(
+            d.append_batch(&t, "s", drafts, None).await.unwrap().len(),
+            1000
+        );
         assert_eq!(bucket.list("checkpoints/").await.unwrap().len(), 1);
         assert!(ks.dir().join(CHECKPOINT_FILE).exists());
         let v = d.verify(&t, "s").await.unwrap();

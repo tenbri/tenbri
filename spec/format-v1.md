@@ -100,11 +100,11 @@ member that is `null` is the same as an absent one; writers omit it.
 | `principal` | per kind | `{kind, id}` of whoever acted; `kind` is `agent`, `person` or `service` |
 | `action` | per kind | `{type, target}`; `target` is optional and is a reference, documented as possibly personal data |
 | `subject` | no | Pseudonymous handle selecting the per-subject keys used for erasure |
-| `inputs` | no | Array of `{ref, version, digest}`: `ref` and `version` plaintext, `digest` keyed |
+| `inputs` | no | Array of `{ref, version, digest}`: `ref` and `version` plaintext, `digest` keyed ([privacy.md](privacy.md), section 3) |
 | `rule` | no | `{ref, version, result}`; MUST be absent when `source` is `proxy` or `ingest` |
 | `approval` | no | `{by, entry}`: the approver (a principal object) and the entry hash of the `approval` entry in this stream that granted it |
 | `links` | no | Array of `{stream, seq, hash, rel}` naming entries in other streams; `rel` is optional, one of `cause`, `handoff`, `approval`. Checked for shape only; following a link needs the linked stream's trust root (*reserved*) |
-| `body` | no | Body address of the encrypted body |
+| `body` | no | Body address of the encrypted body ([privacy.md](privacy.md), section 2) |
 | `attestations` | no | Array of `{key, sig}`: extra signatures by the principal or an approver; see 6.3 |
 | `ext` | no | Object reserved for Experimental features. Hashed and signed like everything else, readable forever; its meaning may change while a feature is Experimental |
 | `key` | per kind | The key event of a `key` entry; see 5 |
@@ -244,7 +244,7 @@ HEAD signature, and the reverse.
   batches/000000000001.jsonl        named by first seq; written once, never rewritten
   checkpoints/000000002000.note     checkpoints.md, section 3
   anchors/000000002000.tsr          RFC 3161 token, receipts.md, section 5
-  blobs/ct-sha256/ab/cd…            reserved
+  blobs/ct-sha256/ab/cd…            privacy.md, section 2
 ```
 
 - A batch file is named by its first sequence number, in decimal, zero-padded to at least 12
