@@ -713,6 +713,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
 
 [[package]]
+name = "futures-executor"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "031b47cf1a3c6cc8bc2fc76cd437f521619387907d469316e7c0bc278f1f5432"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
 name = "futures-io"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1581,6 +1592,36 @@ name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
+
+[[package]]
+name = "opentelemetry"
+version = "0.33.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c1f1a6ac9c875a4941e4c7c085b61e8f4daa326de03b4701768c3491a6ad9ee"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "js-sys",
+ "pin-project-lite",
+ "thiserror",
+]
+
+[[package]]
+name = "opentelemetry_sdk"
+version = "0.33.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "372a912db2974d1990207006fd0e3aa0ef3fd4ad3be43c65cfaadf2206866061"
+dependencies = [
+ "futures-channel",
+ "futures-executor",
+ "futures-util",
+ "opentelemetry",
+ "percent-encoding",
+ "portable-atomic",
+ "rand 0.9.5",
+ "thiserror",
+ "tokio",
+]
 
 [[package]]
 name = "parking_lot"
@@ -2699,6 +2740,10 @@ dependencies = [
 [[package]]
 name = "tenbri-otlp"
 version = "0.1.0-alpha.2"
+dependencies = [
+ "opentelemetry",
+ "tenbri-core",
+]
 
 [[package]]
 name = "tenbri-proxy"
@@ -2738,6 +2783,7 @@ dependencies = [
  "sha2",
  "tenbri-core",
  "tenbri-keys",
+ "tenbri-otlp",
  "tenbri-schema",
  "tenbri-store",
  "tenbri-writer",
@@ -2771,6 +2817,17 @@ version = "0.1.0-alpha.2"
 [[package]]
 name = "tenbri-testkit"
 version = "0.1.0-alpha.2"
+dependencies = [
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "serde",
+ "serde_json",
+ "tenbri-core",
+ "tenbri-keys",
+ "tenbri-store",
+ "tenbri-writer",
+ "tokio",
+]
 
 [[package]]
 name = "tenbri-tiles"
@@ -2792,6 +2849,7 @@ dependencies = [
  "tenbri-core",
  "tenbri-keys",
  "tenbri-merkle",
+ "tenbri-otlp",
  "tenbri-store",
  "tokio",
 ]

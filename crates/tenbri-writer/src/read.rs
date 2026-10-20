@@ -170,6 +170,19 @@ pub struct Report {
 /// ponytail: the latest checkpoint only, each is a pass over the stream; all of them with
 /// incremental roots if a stream's older checkpoints ever need checking against itself.
 pub async fn verify<S: Store>(store: &S, pin: Option<&str>) -> io::Result<Report> {
+    #[cfg(feature = "otel")]
+    let span = tenbri_otlp::Verify::start();
+    let report = verify_inner(store, pin).await?;
+    #[cfg(feature = "otel")]
+    span.end(
+        report.stream.as_deref(),
+        report.entries,
+        report.broken.as_ref(),
+    );
+    Ok(report)
+}
+
+async fn verify_inner<S: Store>(store: &S, pin: Option<&str>) -> io::Result<Report> {
     let mut r = Reader::new(store, pin);
     let mut checkpoint = None;
     let broken = match r.poll().await {
