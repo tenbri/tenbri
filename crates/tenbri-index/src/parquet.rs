@@ -3,7 +3,7 @@
 //! (`SELECT * FROM 'parquet/*.parquet'`), but only the files the manifest names are current.
 
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -204,8 +204,11 @@ impl ParquetIndex {
         let tmp = self.dir.join(format!("{MANIFEST}.tmp"));
         let mut bytes = serde_json::to_vec_pretty(m).map_err(err)?;
         bytes.push(b'\n');
-        fs::write(&tmp, bytes)?;
-        File::open(&tmp)?.sync_all()?;
+        // Synced through the handle that wrote it: Windows refuses to flush a read-only one.
+        let mut f = File::create(&tmp)?;
+        f.write_all(&bytes)?;
+        f.sync_all()?;
+        drop(f);
         fs::rename(tmp, self.dir.join(MANIFEST))
     }
 
