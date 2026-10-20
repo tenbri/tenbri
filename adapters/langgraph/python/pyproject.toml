@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tenbri-langgraph"
+# Set by release.yml from the tag, like the npm packages: one version for everything.
+version = "0.0.0"
+description = "Tenbri for LangGraph and LangChain: every tool call a signed, chained decision."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = ["tenbri>=0.1.0a2", "langchain-core>=1.5,<2", "langgraph>=1.2,<2"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: AsyncIO",
+  "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+otel = ["opentelemetry-api>=1.30"]
+
+[project.urls]
+Repository = "https://github.com/tenbri/tenbri"
+

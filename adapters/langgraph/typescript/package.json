@@ -1,0 +1,50 @@
+{
+  "name": "@tenbri/langgraph",
+  "version": "0.0.0",
+  "description": "Tenbri for LangGraph and LangChain.js: every tool call a signed, chained decision.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tenbri/tenbri.git",
+    "directory": "adapters/langgraph/typescript"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">= 20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && tsc -p test && node --test test/*.test.mts",
+    "example": "node examples/refund-agent.mts"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0"
+  },
+  "peerDependencies": {
+    "@langchain/core": "^1.1.0",
+    "@langchain/langgraph": "^1.1.0",
+    "tenbri": ">=0.1.0-alpha.2"
+  },
+  "devDependencies": {
+    "@langchain/core": "^1.2.19",
+    "@langchain/langgraph": "^1.5.1",
+    "@opentelemetry/context-async-hooks": "^2.0.0",
+    "@opentelemetry/sdk-trace-base": "^2.0.0",
+    "@types/node": "^24.19.2",
+    "langchain": "^1.5.18",
+    "tenbri": "file:../../../bindings/node",
+    "typescript": "^5.9.3",
+    "zod": "^4.1.0"
+  }
+}
