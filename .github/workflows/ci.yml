@@ -9,6 +9,7 @@
 # - python, node, wasm: each binding builds as release.yml builds it and passes its own tests
 #   (pytest and mypy; tsc and node:test; wasm-pack test and the built package in Node), the
 #   vectors among them; the WASM verifier stays within its size budget;
+# - ui: Tenbri UI builds (tsc and Vite), and the page tenbrid embeds is the one its source builds;
 # - adapter-claude-agent-sdk: the Claude Agent SDK adapter, Python and TypeScript, against the SDK's
 #   current and previous release;
 # - adapter-langgraph: the LangGraph and LangChain adapter, Python and TypeScript, against the
@@ -207,6 +208,31 @@ jobs:
             exit 1
           fi
       - run: npm test
+
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: The page tenbrid embeds matches the source
+        run: |
+          if ! git diff --exit-code -- ../crates/tenbri-server/src/ui; then
+            echo "::error::crates/tenbri-server/src/ui/index.html is out of date. Run pnpm --dir ui build and commit it."
+            exit 1
+          fi
 
   wasm:
     runs-on: ubuntu-latest

@@ -221,6 +221,15 @@ async fn rest_round_trip() {
     let (st, v) = get(&s, "/v1/ready", None).await;
     assert_eq!((st, v["status"].as_str()), (StatusCode::OK, Some("ready")));
     assert_eq!(get(&s, "/v1/health", None).await.0, StatusCode::OK);
+    // Tenbri UI: one self-contained page, no token needed to load it.
+    let page = reqwest::get(format!("{}/", s.rest)).await.unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    assert!(
+        page.text()
+            .await
+            .unwrap()
+            .contains("<title>Tenbri UI</title>")
+    );
 
     // An intent: kind, phase, principal, source and durability are filled in.
     let k = id();

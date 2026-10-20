@@ -36,6 +36,24 @@ tenbri verify ./audit/support
 `init()` record it too); anyone else passes `--key` with the fingerprint `init` printed. Set `TENBRI_STREAM=./audit/support` to leave the path
 out, and see `tenbri append --help` for the entry format.
 
+## Tenbri UI
+
+`tenbrid` serves a read-only web UI at its root. Open http://127.0.0.1:7070 and sign in with a
+stream name and a bearer token (`tenbrid token` makes one).
+
+<p align="center">
+  <img src="docs/assets/ui-tour.gif" alt="A tour of Tenbri UI: the overview of a stream, decisions filtered to errors, one decision's timeline and signed chain, its OpenTelemetry trace, and the integrity check">
+</p>
+
+- **Overview**: decisions, error and refusal rates, intent-to-outcome latency, top actions and principals.
+- **Decisions**: every intent joined with its outcome, with search, filters by status, action and principal, and column picker.
+- **Decision and trace views**: a timeline of approval, intent and outcome (or every decision in one OpenTelemetry trace), with each entry's fields, chain links and a receipt download.
+- **Principals** and **Subjects**: who acted, and what was decided about whom.
+- **Integrity**: whether the stream verifies against its pinned key, the head, the latest checkpoint and the key history.
+
+The token stays in the browser tab; the UI reads the same REST API as any client and cannot
+write. Its source is in [`ui/`](ui/README.md).
+
 ## The problem
 
 Companies now give agents real authority: refunds, payments, account changes, production deploys,
@@ -124,7 +142,7 @@ v0.1.0 ships every feature below, each labelled:
 | Bindings | ✅ Rust · ✅ Python · ✅ Node · ✅ WASM verifier | |
 | Adapters | ✅ Claude Agent SDK · ✅ OpenAI Agents SDK · ✅ LangGraph and LangChain | ⬜ Pydantic AI · ⬜ Vercel AI SDK · ⬜ Mastra · ⬜ Google ADK · ⬜ AWS Strands · ⬜ Microsoft Agent Framework · ⬜ CrewAI · ⬜ LlamaIndex · ⬜ A2A |
 | Fleet and liveness | ⬜ `action.net` target fields (host, IP, port) · ⬜ indexed host, IP and domain · ⬜ `query --target-domain` and `--target-ip` | ⬜ run registration and silent-stream alerts in tenbrid · ⬜ proxy-observed entries · ⬜ `query --unmatched` |
-| APIs and tooling | ✅ tenbrid REST and gRPC · ✅ action schemas · ✅ OpenTelemetry correlation · ⬜ webhook and OTLP streaming · ✅ test kit · ⬜ C2SP tiles and witness protocol | ⬜ Generated Go, Java and .NET clients · ⬜ Kafka · ⬜ read-only viewer · ⬜ OpenLineage and W3C PROV exports |
+| APIs and tooling | ✅ tenbrid REST and gRPC · ✅ action schemas · ✅ OpenTelemetry correlation · ⬜ webhook and OTLP streaming · ✅ test kit · ⬜ C2SP tiles and witness protocol | ⬜ Generated Go, Java and .NET clients · ⬜ Kafka · ✅ Tenbri UI, read-only (tenbrid serves it at `/`) · ⬜ OpenLineage and W3C PROV exports |
 
 ## Non-goals
 
