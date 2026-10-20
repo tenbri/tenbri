@@ -11,9 +11,10 @@
 # each stage (alpha.1, beta.1, rc.1, 0.1.0) is moved by a one-time Release-As: footer, never by a
 # value left in the config (CONTRIBUTING.md#releases).
 #
-# A tag made with the default token starts no other workflow, so release.yml is called from here.
-# With a RELEASE_PLEASE_TOKEN secret (a fine-grained token with contents and pull requests: write),
-# CI also runs on the release pull request and the tag's own push starts release.yml instead.
+# Release Please works with the RELEASE_PLEASE_TOKEN secret, a maintainer's fine-grained token
+# (CONTRIBUTING.md#releases), so the release pull request gets CI and pr.yml like any other; the
+# default token starts no workflows. Publishing always goes through the call to release.yml below,
+# never the tag's own push, since the registries' trusted publishers name this file.
 # crates.io and PyPI trusted publishers name this file as the workflow, and the release environment.
 # To publish a release again (a failed run, say), run this workflow by hand with its tag: it skips
 # Release Please and calls release.yml from here, so the registries still see this file.
@@ -45,7 +46,6 @@ jobs:
     outputs:
       released: ${{ steps.release.outputs.release_created }}
       tag: ${{ steps.release.outputs.tag_name }}
-      own-token: ${{ steps.token.outputs.own }}
     steps:
       - id: release
         uses: googleapis/release-please-action@v5
@@ -53,16 +53,12 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      - id: token
-        env:
-          OWN: ${{ secrets.RELEASE_PLEASE_TOKEN != '' }}
-        run: echo "own=$OWN" >> "$GITHUB_OUTPUT"
 
   publish:
     needs: release-please
     if: >-
       always() && (inputs.tag != '' ||
-      (needs.release-please.outputs.released == 'true' && needs.release-please.outputs.own-token != 'true'))
+      needs.release-please.outputs.released == 'true')
     permissions:
       contents: write # binaries, SHA256SUMS, the SBOM and licenses go on the GitHub release
       packages: write

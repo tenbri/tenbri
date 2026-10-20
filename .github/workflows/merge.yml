@@ -1,0 +1,58 @@
+# Maintainers' pull requests merge themselves. When CI or the pull request checks finish on a pull
+# request opened by a member of the tenbri organization, and every check main's ruleset requires has
+# passed, this squash-merges it with the RELEASE_PLEASE_TOKEN secret (a maintainer's token, so the
+# merge starts CI and Release Please on main, and the maintainer's admin bypass covers the review
+# rule). Everyone else's pull requests, Dependabot's included, still need a maintainer's approval.
+# Left for a maintainer to merge by hand: drafts, forks, chore pull requests, the release pull
+# request (merging it publishes a release) and any pull request that changes how releases are made.
+name: Merge
+
+on:
+  workflow_run:
+    workflows: [CI, Pull request]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+      REPO: ${{ github.repository }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - run: |
+          [ -n "$GH_TOKEN" ] || { echo "::notice::No RELEASE_PLEASE_TOKEN secret: nothing merges by itself."; exit 0; }
+          pr=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq "[.[] | select(.state == \"open\" and .head.sha == \"$SHA\")][0]")
+          [ -n "$pr" ] && [ "$pr" != null ] || { echo "No open pull request at $SHA."; exit 0; }
+          number=$(jq -r .number <<<"$pr")
+          case "$(jq -r .author_association <<<"$pr")" in
+            OWNER | MEMBER) ;;
+            *) echo "#$number is not a maintainer's: it waits for a review."; exit 0 ;;
+          esac
+          [ "$(jq -r .draft <<<"$pr")" = false ] || { echo "#$number is a draft."; exit 0; }
+          [ "$(jq -r '.head.repo.full_name == .base.repo.full_name' <<<"$pr")" = true ] || exit 0
+          case "$(jq -r .head.ref <<<"$pr")" in
+            release-please--*) echo "#$number is the release pull request: merge it by hand."; exit 0 ;;
+          esac
+          if jq -r .title <<<"$pr" | grep -qE '^chore(\(|!|:)'; then
+            echo "#$number is a chore: merge it by hand."
+            exit 0
+          fi
+          if gh pr diff "$number" -R "$REPO" --name-only | grep -qxE '\.github/workflows/release(-please)?\.yml|release-please-config\.json|\.release-please-manifest\.json'; then
+            echo "#$number changes how releases are made: merge it by hand."
+            exit 0
+          fi
+          if ! gh pr checks "$number" -R "$REPO" --required --json bucket --jq 'length > 0 and all(.[]; .bucket == "pass")' | grep -qx true; then
+            echo "#$number: required checks still running or failed."
+            exit 0
+          fi
+          gh pr merge "$number" -R "$REPO" --squash --admin --match-head-commit "$SHA"

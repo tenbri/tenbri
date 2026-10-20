@@ -35,9 +35,9 @@ name: Release
 # HOMEBREW_APP_ID variable and HOMEBREW_APP_PRIVATE_KEY secret (a GitHub App installed on the tap
 # repository only). Trusted publishers name
 # release-please.yml (runs by hand too: see above) and the release environment.
+# Only release-please.yml calls this, also to publish a tag again: crates.io's trusted publishers
+# name that file, so a tag push or a run of this file by hand would be refused there.
 on:
-  push:
-    tags: ["v*"]
   workflow_call:
     inputs:
       tag:
@@ -48,12 +48,6 @@ on:
       pypi:
         description: Whether PyPI is set up; release-please.yml uploads the wheels built here
         value: ${{ jobs.version.outputs.pypi }}
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: The tag to publish again, such as v0.1.0
-        type: string
-        required: true
 
 permissions:
   contents: read
