@@ -352,3 +352,101 @@ fn verify_against_checkpoints() {
     );
     std::fs::remove_dir_all(&t).unwrap();
 }
+
+/// `tenbri query` scans without an index and uses one once `tenbri index rebuild` made it: the
+/// same answers, kept up to date as entries are appended, checked against the stream with
+/// `--verify`, a page at a time with `--limit` and `--after`.
+#[test]
+fn query_through_the_index() {
+    let t = std::env::temp_dir().join(format!("tenbri-cli-index-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&t);
+    let (keys, s) = (t.join("keys"), t.join("audit").join("support"));
+    let st = s.to_str().unwrap();
+    let env = [(
+        "TENBRI_INDEX_DIR",
+        t.join("index").to_string_lossy().into_owned(),
+    )];
+    let run = |args: &[&str], stdin: &str| tenbri_env(&keys, args, stdin, &env);
+    let o = run(&["init", st], "");
+    let fp = out(&o)
+        .lines()
+        .find_map(|l| l.strip_prefix("stream key fingerprint (pin it): "))
+        .unwrap()
+        .to_owned();
+    let append = |version: &str, action: &str| {
+        let e = format!(
+            r#"{{"kind":"decision","phase":"intent","source":"sdk","principal":{{"kind":"agent","id":"a"}},"action":{{"type":"{action}","target":"t:1"}},"rule":{{"ref":"rule:limit","version":"{version}","result":"allow"}},"inputs":[{{"ref":"policy:refund","version":"{version}","digest":"hmac-sha256:9f2c41aa9f2c41aa9f2c41aa9f2c41aa9f2c41aa9f2c41aa9f2c41aa9f2c41aa"}}]}}"#
+        );
+        let o = run(&["append", st], &e);
+        assert!(o.status.success(), "{o:?}");
+    };
+    append("13", "reply_ticket");
+    append("14", "issue_refund");
+    append("14", "reply_ticket");
+    let rows = |args: &[&str]| -> Vec<serde_json::Value> {
+        let o = run(args, "");
+        assert!(o.status.success(), "{args:?}: {o:?}");
+        out(&o)
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    };
+    let q = ["query", st, "--input", "policy:refund@14", "--key", &fp];
+    let scanned = rows(&q);
+    assert_eq!(scanned.len(), 2);
+    assert_eq!(scanned[0]["verification"], "verified");
+    assert_eq!(scanned[0]["entry"]["seq"], scanned[0]["seq"]);
+    assert!(scanned[0]["hash"].as_str().unwrap().starts_with("sha256:"));
+    assert_eq!(scanned[0]["as_of"]["seq"], 5);
+
+    let o = run(&["index", "rebuild", st], "");
+    assert!(out(&o).starts_with("indexed 5 entries"), "{o:?}");
+    let indexed = rows(&q);
+    let strip = |v: &[serde_json::Value]| -> Vec<(serde_json::Value, serde_json::Value)> {
+        v.iter()
+            .map(|r| (r["entry"].clone(), r["hash"].clone()))
+            .collect()
+    };
+    assert_eq!(strip(&indexed), strip(&scanned));
+    assert_eq!(indexed[0]["verification"], "indexed");
+    assert_eq!(
+        rows(&["query", st, "--rule", "rule:limit@13"]).len(),
+        1,
+        "by rule"
+    );
+    assert_eq!(
+        rows(&["query", st, "--principal", "agent:a", "--since", "1h"]).len(),
+        3
+    );
+    assert_eq!(rows(&["query", st, "--until", "1h"]).len(), 0);
+
+    // Appended after the index was built: the next query brings it up to date.
+    append("14", "close_ticket");
+    let v = rows(&[&q[..], &["--verify"]].concat());
+    assert_eq!(v.len(), 3);
+    assert!(v.iter().all(|r| r["verification"] == "verified"));
+    assert_eq!(v[2]["as_of"]["seq"], 6);
+
+    // Pages.
+    let o = run(&[&q[..], &["--limit", "2"]].concat(), "");
+    assert_eq!(out(&o).lines().count(), 2);
+    let err = String::from_utf8_lossy(&o.stderr);
+    let after = err.trim().rsplit(' ').next().unwrap().to_owned();
+    assert_eq!(after, v[1]["seq"].to_string(), "{err}");
+    let last = rows(&[&q[..], &["--after", &after]].concat());
+    assert_eq!(strip(&last), strip(&v[2..]));
+
+    // Parquet answers the same.
+    let o = run(&["index", "rebuild", st, "--backend", "parquet"], "");
+    assert!(out(&o).contains("(parquet)"), "{o:?}");
+    assert_eq!(strip(&rows(&q)), strip(&v));
+
+    // A tampered stream: the index still answers from what it read, --verify refuses.
+    let batch = s.join("batches").join("000000000004.jsonl");
+    let text = std::fs::read_to_string(&batch).unwrap();
+    std::fs::write(&batch, text.replace("t:1", "t:2")).unwrap();
+    assert_eq!(rows(&q).len(), 3);
+    let o = run(&[&q[..], &["--verify"]].concat(), "");
+    assert_eq!(o.status.code(), Some(1), "{o:?}");
+    std::fs::remove_dir_all(&t).unwrap();
+}

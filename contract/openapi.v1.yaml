@@ -116,7 +116,10 @@ paths:
       - token: []
   /v1/streams/{stream}/entries:
     get:
-      summary: Entries matching every filter given, in sequence order.
+      summary: |-
+        Entries matching every filter given, in sequence order, through the stream's index (SQLite or
+        Parquet); `as_of` says what the index had read. The entries are the ones tenbrid read and
+        verified, each with its seq and entry hash.
       operationId: query_entries
       parameters:
       - name: stream
@@ -127,7 +130,7 @@ paths:
           type: string
       - name: input
         in: query
-        description: An input the entry used, as ref@version (policy:refund@14); repeat to require several
+        description: An input the entry used, as ref@version (policy:refund@14), or ref for any version; repeat to require several
         required: false
         schema:
           type: array
@@ -154,6 +157,36 @@ paths:
       - name: subject
         in: query
         description: The subject handle
+        required: false
+        schema:
+          type: string
+      - name: rule
+        in: query
+        description: The rule, as ref@version, or ref for any version
+        required: false
+        schema:
+          type: string
+      - name: since
+        in: query
+        description: 'Entries at or after this time: 2026-10-20T09:00:00.000Z, 2026-10-20T09:00:00Z, 2026-10-20, or a duration ago (90s, 15m, 1h, 7d); ts is the writer''s claimed time'
+        required: false
+        schema:
+          type: string
+      - name: until
+        in: query
+        description: Entries before this time, in the same forms as since
+        required: false
+        schema:
+          type: string
+      - name: trace_id
+        in: query
+        description: The OpenTelemetry trace id (32 hex digits)
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        description: 'An outcome''s status: ok, error, refused or unknown'
         required: false
         schema:
           type: string
@@ -518,6 +551,32 @@ components:
           items:
             type: string
           description: Schema warnings, such as an action type tenbri.toml does not declare.
+    AsOfBody:
+      type: object
+      description: 'What the answer is current to: the stream''s index had read up to here.'
+      required:
+      - stream
+      - seq
+      - hash
+      properties:
+        checkpoint:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: The size of the stream's latest checkpoint at or below `seq`, if it has one.
+          minimum: 0
+        hash:
+          type: string
+          description: The entry hash at `seq`.
+        seq:
+          type: integer
+          format: int64
+          description: The last sequence number indexed.
+          minimum: 0
+        stream:
+          type: string
+          description: The stream id (tnb1:...).
     BatchBody:
       type: object
       required:
@@ -589,16 +648,29 @@ components:
       required:
       - verification
       - entry
+      - seq
+      - hash
       properties:
         entry:
           type: object
+        hash:
+          type: string
+          description: Its entry hash (sha256:...), to check against the chain, a checkpoint or a receipt.
+        seq:
+          type: integer
+          format: int64
+          description: Its sequence number.
+          minimum: 0
         verification:
           $ref: '#/components/schemas/VerificationBody'
     QueryBody:
       type: object
       required:
       - entries
+      - as_of
       properties:
+        as_of:
+          $ref: '#/components/schemas/AsOfBody'
         entries:
           type: array
           items:

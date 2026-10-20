@@ -7,10 +7,13 @@
 //! schema = "tenbri.toml"           # action schemas; TENBRI_SCHEMA; none: nothing is checked
 //! queue = 10000                    # appends waiting per stream (a batch counts once); TENBRI_QUEUE
 //! deadline_ms = 2000               # how long an append waits for the queue; TENBRI_DEADLINE_MS
+//! index_dir = "/var/cache/tenbri/index"  # query indexes, one directory per stream; TENBRI_INDEX_DIR;
+//!                                  # default: the user's cache directory. Derived: safe to delete
 //!
 //! [streams.support]                # the stream's name in URLs (its tnb1: id works too)
 //! path = "/var/lib/tenbri/audit/support"  # or s3://bucket/prefix, r2://bucket/prefix
 //! key = "sha256:..."               # pin; default: the stream key held in `keys`
+//! index = "sqlite"                 # the query index: sqlite (default) or parquet
 //!
 //! [anchor]                         # optional: RFC 3161 timestamps of checkpoints
 //! tsa = "https://tsa.example/"     # the timestamp authority's URL
@@ -45,6 +48,8 @@ pub struct Config {
     pub queue: usize,
     #[serde(default = "deadline_ms")]
     pub deadline_ms: u64,
+    /// Where the streams' query indexes live.
+    pub index_dir: Option<PathBuf>,
     #[serde(default)]
     pub streams: BTreeMap<String, StreamConfig>,
     #[serde(default)]
@@ -73,6 +78,9 @@ pub struct StreamConfig {
     pub path: String,
     /// The genesis key's fingerprint (`sha256:…`) or public key (`ed25519:…`).
     pub key: Option<String>,
+    /// The query index's backend.
+    #[serde(default)]
+    pub index: tenbri_index::Kind,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -121,6 +129,9 @@ impl Config {
         c.keys = env("TENBRI_KEYS")
             .map(PathBuf::from)
             .or(c.keys.map(|p| base.join(p)));
+        c.index_dir = env("TENBRI_INDEX_DIR")
+            .map(PathBuf::from)
+            .or(c.index_dir.map(|p| base.join(p)));
         c.schema = env("TENBRI_SCHEMA")
             .map(PathBuf::from)
             .or(c.schema.map(|p| base.join(p)));
