@@ -9,7 +9,7 @@ never edits an old one.
 the format is final; they are frozen at the v0.1.0 tag. They are made from fixed seeds by
 `cargo run -p tenbri-core --example vectors -- spec/vectors`, except the canonical-JSON cases,
 which are written by hand, and `merkle.json` and `checkpoints.json`, made from the `valid` stream of
-`chains.json` by `cargo run -p tenbri-merkle --example vectors -- spec/vectors`, `privacy.json`,
+`chains.json` by `cargo run -p tenbri-merkle --example merkle-vectors -- spec/vectors`, `privacy.json`,
 made by `cargo run -p tenbri-crypt --example vectors -- spec/vectors`, and `receipts.json`, made
 from the same seeds as `chains.json` and a test timestamp authority by
 `cargo run -p tenbri-anchor --features test-tsa --example receipt-vectors -- spec/vectors`. Error
