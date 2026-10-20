@@ -15,6 +15,7 @@
 //! approval = true                   # an approval is required
 //! durability = "replicated"         # the tier the entry must carry
 //! target = "stripe:charge/*"        # `*` matches any run of characters
+//! policy = "policy:refund@14"       # a rule is required, with this ref and version
 //!
 //! [actions.issue_refund.fields."rule.result"]
 //! allowed = ["allow"]
@@ -27,6 +28,10 @@
 //! The requirements apply to intents, which state the decision before the action runs. Every
 //! other entry naming an action (outcomes, approvals, notes, ingested decisions) is checked for a
 //! declared action type only.
+//!
+//! A `target` may name the action's arguments in braces, `stripe:{charge}`: each placeholder matches
+//! like `*`, and the SDKs' framework instrumentation fills it from the tool call's arguments, with
+//! `policy` as the intent's `rule`.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -73,9 +78,13 @@ pub struct ActionSchema {
     /// The entry's `durability` must be this tier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durability: Option<Durability>,
-    /// `action.target` must be present and match; `*` matches any run of characters.
+    /// `action.target` must be present and match; `*` and `{argument}` match any run of
+    /// characters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// `ref@version`: a `rule` is required, with this `ref` and `version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<String>,
     /// Any member by its dotted path into the entry.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fields: BTreeMap<String, Field>,
@@ -142,6 +151,9 @@ impl Schemas {
             let at = |m: String| format!("actions.{name}: {m}");
             if name.is_empty() {
                 return Err("an action type cannot be empty".into());
+            }
+            if a.policy.as_deref().is_some_and(|p| policy(p).is_none()) {
+                return Err(at("policy: expected ref@version".into()));
             }
             for (path, f) in &a.fields {
                 let first = path.split('.').next().unwrap_or_default();
@@ -251,10 +263,21 @@ impl ActionSchema {
             out.push((
                 "action.target".into(),
                 Field {
-                    pattern: Some(t.clone()),
+                    pattern: Some(placeholders_as_globs(t)),
                     ..required()
                 },
             ));
+        }
+        if let Some((r, v)) = self.policy.as_deref().and_then(policy) {
+            for (path, value) in [("rule.ref", r), ("rule.version", v)] {
+                out.push((
+                    path.into(),
+                    Field {
+                        allowed: vec![Value::from(value)],
+                        ..required()
+                    },
+                ));
+            }
         }
         out.extend(self.fields.iter().map(|(k, f)| (k.clone(), f.clone())));
         out
@@ -280,6 +303,30 @@ impl Type {
             Type::Array => "an array",
         }
     }
+}
+
+/// `ref@version` split at its last `@`, both non-empty.
+fn policy(p: &str) -> Option<(&str, &str)> {
+    p.rsplit_once('@')
+        .filter(|(r, v)| !r.is_empty() && !v.is_empty())
+}
+
+/// A target with each `{argument}` placeholder as `*`.
+fn placeholders_as_globs(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    let mut rest = t;
+    while let Some(i) = rest.find('{') {
+        match rest[i..].find('}') {
+            Some(j) => {
+                out.push_str(&rest[..i]);
+                out.push('*');
+                rest = &rest[i + j + 1..];
+            }
+            None => break,
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn list(vs: &[Value]) -> String {
@@ -422,10 +469,32 @@ mod tests {
             "[actions.x.fields.\"ext.a\"]\ntype = \"integer\"\nallowed = [\"1\"]",
             "[actions.x.fields.\"ext.a\"]\ntype = \"integer\"\npattern = \"a*\"",
             "[actions.x]\ndurability = \"fast\"",
+            "[actions.x]\npolicy = \"refund\"",
+            "[actions.x]\npolicy = \"refund@\"",
             "unknown_actions = \"ignore\"",
         ] {
             assert!(Schemas::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn placeholder_targets_and_policies() {
+        let s = Schemas::parse(
+            "[actions.refund]\ntarget = \"stripe:{charge}/{amount}\"\npolicy = \"policy:refund@14\"",
+        )
+        .unwrap();
+        let ok = entry(
+            r#"{"kind":"decision","phase":"intent","action":{"type":"refund","target":"stripe:ch_1/20"},
+            "rule":{"ref":"policy:refund","version":"14","result":"allow"}}"#,
+        );
+        assert_eq!(s.check(&ok), Checked::default());
+        let bad = entry(
+            r#"{"kind":"decision","phase":"intent","action":{"type":"refund","target":"zendesk:1"},
+            "rule":{"ref":"policy:refund","version":"13","result":"allow"}}"#,
+        );
+        assert_eq!(paths(&s.check(&bad)), ["action.target", "rule.version"]);
+        assert_eq!(placeholders_as_globs("a{b}c{d}"), "a*c*");
+        assert_eq!(placeholders_as_globs("a{b"), "a{b");
     }
 
     #[test]
