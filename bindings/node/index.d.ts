@@ -9,5 +9,29 @@
  */
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
+/** One open stream; see tenbri_bindings::Stream. */
+export declare class Stream {
+  static open(location: string, options?: OpenOptions | undefined | null): Promise<Stream>
+  get id(): string
+  get fingerprint(): string | null
+  get writable(): boolean
+  append(draft: string): Promise<string>
+  intent(draft: string): Promise<string>
+  outcome(intent: string, status: string, draft: string): Promise<string>
+  verify(key?: string | undefined | null): Promise<string>
+  query(filter: string): Promise<string>
+  flush(): Promise<void>
+  close(): Promise<void>
+}
+
+/** A new entry id (ULID), for idempotent retries. */
+export declare function newId(): string
+
+export interface OpenOptions {
+  keys?: string
+  key?: string
+  create?: boolean
+}
+
 /** The package's version. */
 export declare function version(): string

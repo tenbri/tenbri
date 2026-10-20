@@ -8,9 +8,11 @@
     "url": "git+https://github.com/tenbri/tenbri.git",
     "directory": "bindings/node"
   },
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "tenbri.js",
+  "types": "tenbri.d.ts",
   "files": [
+    "tenbri.js",
+    "tenbri.d.ts",
     "index.js",
     "index.d.ts"
   ],
@@ -32,9 +34,11 @@
   },
   "scripts": {
     "build": "napi build --platform --release",
-    "test": "node --test"
+    "test": "tsc -p . && node --test __test__/*.test.mts"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.0.0"
+    "@napi-rs/cli": "^3.0.0",
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3"
   }
 }
