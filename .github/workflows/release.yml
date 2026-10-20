@@ -544,7 +544,10 @@ jobs:
       contents: read
       id-token: write
     env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Trusted publishing when NPM_TRUSTED_PUBLISHING is true, even with an NPM_TOKEN secret kept:
+      # the token then only moves dist-tags, which trusted publishing can't do.
+      NODE_AUTH_TOKEN: ${{ vars.NPM_TRUSTED_PUBLISHING != 'true' && secrets.NPM_TOKEN || '' }}
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       VERSION: ${{ needs.version.outputs.version }}
       NPM_TAG: ${{ needs.version.outputs.npm-tag }}
     steps:
@@ -593,8 +596,8 @@ jobs:
             # npm points latest at a package's first publish, a pre-release included. Until 0.1.0,
             # latest goes back to the 0.0.0 placeholder that reserved the name.
             if [ "$prerelease" = true ] && [[ "$(npm view "$name" dist-tags.latest 2>/dev/null)" == *-* ]]; then
-              if [ -n "$NODE_AUTH_TOKEN" ] && [ "$(npm view "$name@0.0.0" version 2>/dev/null)" = 0.0.0 ]; then
-                npm dist-tag add "$name@0.0.0" latest
+              if [ -n "$NPM_TOKEN" ] && [ "$(npm view "$name@0.0.0" version 2>/dev/null)" = 0.0.0 ]; then
+                NODE_AUTH_TOKEN="$NPM_TOKEN" npm dist-tag add "$name@0.0.0" latest
               else
                 echo "::warning::$name's latest points at a pre-release. Move it with npm dist-tag (needs NPM_TOKEN and a 0.0.0 placeholder)."
               fi
