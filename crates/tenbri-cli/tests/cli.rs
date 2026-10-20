@@ -5,7 +5,12 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 fn tenbri(keys: &Path, args: &[&str], stdin: &str) -> Output {
+    tenbri_env(keys, args, stdin, &[])
+}
+
+fn tenbri_env(keys: &Path, args: &[&str], stdin: &str, env: &[(&str, String)]) -> Output {
     let mut c = Command::new(env!("CARGO_BIN_EXE_tenbri"))
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .arg("--keys")
         .arg(keys)
         .args(args)
@@ -129,6 +134,64 @@ fn round_trip() {
         Some(1)
     );
     std::fs::remove_dir_all(&t).unwrap();
+}
+
+/// init → append → verify on an S3-compatible bucket, when `TENBRI_TEST_S3_*` is set (MinIO in
+/// CI): the binary takes its credentials from the `AWS_*` variables.
+#[test]
+fn s3_round_trip() {
+    let var = |k: &str| {
+        std::env::var(format!("TENBRI_TEST_S3_{k}"))
+            .ok()
+            .filter(|v| !v.is_empty())
+    };
+    let Some(bucket) = var("BUCKET") else {
+        eprintln!("TENBRI_TEST_S3_* not set: skipped");
+        return;
+    };
+    let mut env = vec![
+        ("AWS_ACCESS_KEY_ID", var("ACCESS_KEY_ID").unwrap()),
+        ("AWS_SECRET_ACCESS_KEY", var("SECRET_ACCESS_KEY").unwrap()),
+        (
+            "AWS_REGION",
+            var("REGION").unwrap_or_else(|| "us-east-1".into()),
+        ),
+    ];
+    if let Some(e) = var("ENDPOINT") {
+        env.push(("AWS_ALLOW_HTTP", e.starts_with("http://").to_string()));
+        env.push(("AWS_ENDPOINT_URL", e));
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let url = format!("s3://{bucket}/tenbri-tests/cli-{nanos}/support");
+    let keys = std::env::temp_dir().join(format!("tenbri-cli-s3-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&keys);
+    let run = |args: &[&str], stdin: &str| tenbri_env(&keys, args, stdin, &env);
+
+    let o = run(&["init", &url], "");
+    assert!(o.status.success(), "{o:?}");
+    let fp = out(&o)
+        .lines()
+        .find_map(|l| l.strip_prefix("stream key fingerprint (pin it): "))
+        .unwrap()
+        .to_owned();
+    assert_eq!(run(&["init", &url], "").status.code(), Some(2), "used");
+    assert!(
+        run(&["append", &url], r#"{"kind":"note"}"#)
+            .status
+            .success()
+    );
+    let o = run(&["verify", &url, "--key", &fp], "");
+    assert_eq!(o.status.code(), Some(0), "{o:?}");
+    assert!(out(&o).starts_with("verified 3 entries"), "{}", out(&o));
+    let o = run(
+        &["verify", "s3://no-such-bucket-tenbri/x", "--key", &fp],
+        "",
+    );
+    assert_eq!(o.status.code(), Some(2), "{o:?}");
+    std::fs::remove_dir_all(&keys).unwrap();
 }
 
 #[test]

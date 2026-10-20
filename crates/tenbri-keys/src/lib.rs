@@ -186,6 +186,16 @@ impl KeyStore {
     /// Opens (creating it, owner-only) the key directory of `stream` under `keys_dir`, after
     /// checking it is apart from `stream_dir`.
     pub fn open(keys_dir: &Path, stream_dir: &Path, stream: &str) -> io::Result<KeyStore> {
+        KeyStore::open_with(keys_dir, Some(stream_dir), stream)
+    }
+
+    /// Opens the key directory of `stream`, kept in an object store (`s3://…`): no directory on
+    /// this machine to keep the keys apart from.
+    pub fn open_for_object_store(keys_dir: &Path, stream: &str) -> io::Result<KeyStore> {
+        KeyStore::open_with(keys_dir, None, stream)
+    }
+
+    fn open_with(keys_dir: &Path, stream_dir: Option<&Path>, stream: &str) -> io::Result<KeyStore> {
         if tenbri_core::encoding::prefixed::<16>(stream, "tnb1:").is_none() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -193,7 +203,9 @@ impl KeyStore {
             ));
         }
         private_dir(keys_dir)?;
-        check_apart(keys_dir, stream_dir)?;
+        if let Some(stream_dir) = stream_dir {
+            check_apart(keys_dir, stream_dir)?;
+        }
         // A stream id has a ':', which Windows does not allow in a file name.
         let dir = keys_dir.join(stream.replace(':', "-"));
         private_dir(&dir)?;

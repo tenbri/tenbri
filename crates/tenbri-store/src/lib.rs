@@ -2,8 +2,16 @@
 //!
 //! A [`Store`] holds one stream's objects by key (`HEAD`, `batches/000000000001.jsonl`). The
 //! writer fences itself with [`Store::put_if_absent`] and advances HEAD with
-//! [`Store::compare_and_swap`]; nothing else needs to be atomic. 0.1.0-alpha.1 ships
-//! [`LocalStore`]; object stores (S3, R2, MinIO) implement the same trait with conditional writes.
+//! [`Store::compare_and_swap`]; nothing else needs to be atomic. [`LocalStore`] keeps a stream in
+//! a directory; with the `s3` feature, [`Bucket`] keeps it under a prefix of an S3, R2 or MinIO
+//! bucket with conditional writes, and [`open`] picks one from a location string.
+
+#[cfg(feature = "s3")]
+mod bucket;
+#[cfg(feature = "s3")]
+pub use bucket::Bucket;
+#[cfg(feature = "s3")]
+pub use object_store;
 
 use std::future::Future;
 use std::io;
@@ -103,16 +111,7 @@ impl LocalStore {
     }
 
     fn path(&self, key: &str) -> io::Result<PathBuf> {
-        let ok = !key.is_empty()
-            && key
-                .split('/')
-                .all(|p| !p.is_empty() && p != "." && p != ".." && !p.contains('\\'));
-        if !ok {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("bad key {key:?}"),
-            ));
-        }
+        check_key(key)?;
         Ok(self.root.join(key))
     }
 
@@ -217,6 +216,83 @@ impl Store for LocalStore {
     }
     async fn delete(&self, key: &str) -> io::Result<()> {
         self.delete_sync(key)
+    }
+}
+
+/// A key is `/`-separated names, none empty, `.`, `..` or holding a backslash.
+fn check_key(key: &str) -> io::Result<()> {
+    let ok = !key.is_empty()
+        && key
+            .split('/')
+            .all(|p| !p.is_empty() && p != "." && p != ".." && !p.contains('\\'));
+    if !ok {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("bad key {key:?}"),
+        ));
+    }
+    Ok(())
+}
+
+/// A stream's store, chosen at run time: a local directory or, with the `s3` feature, a bucket.
+#[derive(Clone, Debug)]
+pub enum AnyStore {
+    Local(LocalStore),
+    #[cfg(feature = "s3")]
+    Bucket(Bucket),
+}
+
+/// Opens the store at `location`: `s3://bucket/prefix`, `r2://bucket/prefix` (and, with the
+/// `experimental` feature, `gs://` and `az://`) as a [`Bucket`], running its canary; anything
+/// else as a local directory, which must exist.
+pub async fn open(location: &str) -> io::Result<AnyStore> {
+    if is_url(location) {
+        #[cfg(feature = "s3")]
+        return Ok(AnyStore::Bucket(Bucket::open(location).await?));
+        #[cfg(not(feature = "s3"))]
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!("{location}: object stores need tenbri-store's `s3` feature"),
+        ));
+    }
+    LocalStore::open(location).map(AnyStore::Local)
+}
+
+/// Is `location` an object-store URL rather than a local path?
+pub fn is_url(location: &str) -> bool {
+    location.contains("://")
+}
+
+macro_rules! each {
+    ($s:expr, $x:ident => $e:expr) => {
+        match $s {
+            AnyStore::Local($x) => $e,
+            #[cfg(feature = "s3")]
+            AnyStore::Bucket($x) => $e,
+        }
+    };
+}
+
+impl Store for AnyStore {
+    async fn get(&self, key: &str) -> io::Result<Option<Object>> {
+        each!(self, s => s.get(key).await)
+    }
+    async fn put_if_absent(&self, key: &str, bytes: &[u8]) -> io::Result<Put> {
+        each!(self, s => s.put_if_absent(key, bytes).await)
+    }
+    async fn compare_and_swap(
+        &self,
+        key: &str,
+        expected: Option<&Version>,
+        bytes: &[u8],
+    ) -> io::Result<Swap> {
+        each!(self, s => s.compare_and_swap(key, expected, bytes).await)
+    }
+    async fn list(&self, prefix: &str) -> io::Result<Vec<Listed>> {
+        each!(self, s => s.list(prefix).await)
+    }
+    async fn delete(&self, key: &str) -> io::Result<()> {
+        each!(self, s => s.delete(key).await)
     }
 }
 

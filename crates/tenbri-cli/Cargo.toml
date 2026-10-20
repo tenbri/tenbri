@@ -16,8 +16,10 @@ doc = false
 
 [features]
 # The CLI ships with every Stable feature.
-default = ["keychain"]
+default = ["keychain", "s3"]
 keychain = ["tenbri-keys/keychain"]
+# Streams in AWS S3, Cloudflare R2 and MinIO (s3:// and r2:// locations).
+s3 = ["tenbri-store/s3"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

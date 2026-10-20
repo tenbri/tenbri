@@ -191,7 +191,8 @@ impl From<tenbri_writer::WriteError> for ApiError {
             },
             W::Conflict { .. } => ApiError::new(ErrorCode::WriteConflict, msg),
             W::NoSession(_) => ApiError::new(ErrorCode::NoSessionKey, msg),
-            W::Io(_) | W::NoStream => ApiError::new(ErrorCode::StoreUnavailable, msg),
+            W::Io(_) | W::NoStream | W::Closed => ApiError::new(ErrorCode::StoreUnavailable, msg),
+            W::Backpressure => ApiError::new(ErrorCode::DeadlineExceeded, msg),
             W::Exists => ApiError::new(ErrorCode::Internal, msg),
         }
     }

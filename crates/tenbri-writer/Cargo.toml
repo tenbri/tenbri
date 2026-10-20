@@ -17,6 +17,8 @@ serde_json = "1"
 tenbri-core.workspace = true
 tenbri-keys.workspace = true
 tenbri-store.workspace = true
+tokio = { version = "1", features = ["rt", "sync", "time"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tenbri-store = { workspace = true, features = ["s3"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
