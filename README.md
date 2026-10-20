@@ -32,8 +32,8 @@ tenbri show ./audit/support 3
 tenbri verify ./audit/support
 ```
 
-`init` pins the stream's key on this machine, so `verify` checks against it; anyone else passes
-`--key` with the fingerprint `init` printed. Set `TENBRI_STREAM=./audit/support` to leave the path
+`init` pins the stream's key on this machine, so `verify` checks against it (the Python and Node
+`init()` record it too); anyone else passes `--key` with the fingerprint `init` printed. Set `TENBRI_STREAM=./audit/support` to leave the path
 out, and see `tenbri append --help` for the entry format.
 
 ## The problem

@@ -3407,6 +3407,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tenbri-anchor",
+ "tenbri-bindings",
  "tenbri-core",
  "tenbri-crypt",
  "tenbri-index",
@@ -3483,6 +3484,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tenbri-core",
+ "tenbri-store",
  "zeroize",
 ]
 

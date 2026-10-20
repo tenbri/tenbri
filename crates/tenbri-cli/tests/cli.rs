@@ -585,3 +585,30 @@ fn for_people() {
     assert_eq!(o.status.code(), Some(1), "a wrong --key: {o:?}");
     std::fs::remove_dir_all(&t).unwrap();
 }
+
+/// A stream the SDKs create (Python and Node `init()`, through tenbri-bindings) records its pin as
+/// `tenbri init` does: `verify` without `--key` uses it.
+#[test]
+fn verify_uses_the_pin_sdk_creation_recorded() {
+    let t = std::env::temp_dir().join(format!("tenbri-cli-sdk-pin-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&t);
+    let (keys, s) = (t.join("keys"), t.join("audit"));
+    let st = s.to_str().unwrap();
+    let o = tenbri_bindings::Options {
+        keys: Some(keys.clone()),
+        create: true,
+        ..Default::default()
+    };
+    let fp = tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let stream = tenbri_bindings::Stream::open(st, o).await.unwrap();
+        stream.close().await;
+        stream.fingerprint().unwrap().to_owned()
+    });
+    let pins = std::fs::read_to_string(keys.join("pins")).unwrap();
+    let abs = std::fs::canonicalize(&s).unwrap();
+    assert_eq!(pins, format!("{} {fp}\n", abs.display()));
+    let v = tenbri(&keys, &["verify", st], "");
+    assert_eq!(v.status.code(), Some(0), "{v:?}");
+    assert!(out(&v).contains(&format!("pinned to {fp}")), "{v:?}");
+    std::fs::remove_dir_all(&t).unwrap();
+}

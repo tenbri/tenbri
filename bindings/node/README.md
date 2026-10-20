@@ -41,7 +41,9 @@ be written, the function does not run), then its outcome follows: `ok`, `refused
 
 `init()` opens the process's default stream, creating it and its keys on first use, and closes it
 (flushing) before the process exits; `await using log = await init(...)` scopes it to a block.
-Awaiting it is optional: a decision waits for it. Every option defaults to an environment
+Awaiting it is optional: a decision waits for it. Creating a stream (here or with
+`Tenbri.open(..., { create: true })`) records its pin in `<keys>/pins`, as `tenbri init` does, so
+`tenbri verify <stream>` on this machine needs no `--key`. Every option defaults to an environment
 variable:
 
 | Option | Variable | |

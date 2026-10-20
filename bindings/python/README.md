@@ -40,7 +40,9 @@ Sync and async functions alike.
   `tenbri-langgraph`).
 
 `init()` opens the process's default stream, creating it and its keys on first use, and closes it
-(flushing) at exit; `with tenbri.init(...):` scopes it to a block. Every argument defaults to an
+(flushing) at exit; `with tenbri.init(...):` scopes it to a block. Creating a stream (here or with
+`Tenbri.open(..., create=True)`) records its pin in `<keys>/pins`, as `tenbri init` does, so
+`tenbri verify <stream>` on this machine needs no `--key`. Every argument defaults to an
 environment variable:
 
 | Argument | Variable | |
