@@ -31,7 +31,7 @@ use tenbri_writer::{
 #[command(
     name = "tenbri",
     version,
-    about = "Audit trail for AI agents: every decision signed, chained and provable."
+    about = "The open-source Agent Decision Record: every decision signed, chained and provable."
 )]
 struct Cli {
     /// Keys directory [default: $TENBRI_KEYS, else ~/.config/tenbri/keys]. Never inside a stream.

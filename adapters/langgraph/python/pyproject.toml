@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "tenbri-langgraph"
 # Set by release.yml from the tag, like the npm packages: one version for everything.
 version = "0.0.0"
-description = "Tenbri for LangGraph and LangChain: every tool call a signed, chained decision."
+description = "The Tenbri Agent Decision Record for LangGraph and LangChain: every tool call a signed, chained decision."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"

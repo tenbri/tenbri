@@ -1,7 +1,7 @@
 {
   "name": "@tenbri/claude-agent-sdk",
   "version": "0.0.0",
-  "description": "Tenbri for the Claude Agent SDK: every tool call a signed, provable decision.",
+  "description": "The Tenbri Agent Decision Record for the Claude Agent SDK: every tool call a signed, provable decision.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

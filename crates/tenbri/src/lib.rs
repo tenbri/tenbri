@@ -1,4 +1,5 @@
-//! Tamper-evident log of AI agent decisions: the facade crate that re-exports the Tenbri API.
+//! The open-source Agent Decision Record, a tamper-evident audit trail for AI agents: the facade
+//! crate that re-exports the Tenbri API.
 //!
 //! Placeholder: the crate name is reserved and builds; the code lands later.
 

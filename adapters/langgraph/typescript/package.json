@@ -1,7 +1,7 @@
 {
   "name": "@tenbri/langgraph",
   "version": "0.0.0",
-  "description": "Tenbri for LangGraph and LangChain.js: every tool call a signed, chained decision.",
+  "description": "The Tenbri Agent Decision Record for LangGraph and LangChain.js: every tool call a signed, chained decision.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

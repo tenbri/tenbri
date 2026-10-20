@@ -1,7 +1,7 @@
 # tenbri (Python)
 
-Python bindings for [Tenbri](https://github.com/tenbri/tenbri). Audit trail for AI agents:
-every decision signed, chained and provable. The same Rust core as the `tenbri` CLI and tenbrid,
+Python bindings for [Tenbri](https://github.com/tenbri/tenbri). The open-source Agent
+Decision Record: every decision signed, chained and provable. The same Rust core as the `tenbri` CLI and tenbrid,
 as an abi3 wheel for Python 3.10 and later.
 
 ```sh
