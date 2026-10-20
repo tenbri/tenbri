@@ -1,6 +1,7 @@
 //! The writer's conformance suite, run on every store: a local directory, an in-memory object
 //! store (with the same conditional-write answers as S3), and an S3-compatible bucket when
-//! `TENBRI_TEST_S3_BUCKET` and its credentials are set (MinIO in CI, R2 and S3 nightly).
+//! `TENBRI_TEST_S3_BUCKET` and its credentials are set (MinIO in CI, R2 and S3 nightly). Every
+//! writer runs with the checkpoint hook, as tenbrid's do.
 
 use std::collections::{BTreeMap, HashSet};
 use std::io;
@@ -11,12 +12,13 @@ use std::time::Duration;
 
 use tenbri_core::{Code, Entry, Kind, Principal, PrincipalKind, Status};
 use tenbri_keys::{Key, SESSION_LIFETIME_MS};
+use tenbri_merkle::checkpoint;
 use tenbri_store::object_store::aws::AmazonS3Builder;
 use tenbri_store::object_store::memory::InMemory;
 use tenbri_store::{AnyStore, Bucket, Listed, LocalStore, Object, Put, Store, Swap, Version};
 use tenbri_writer::{
-    Commit, GC_MIN_AGE, Hook, Lane, LaneConfig, Reader, Report, WriteError, Writer, batch_key,
-    batch_seq, gc, now_ms, verify,
+    Checkpoints, Commit, GC_MIN_AGE, Hook, Lane, LaneConfig, Reader, Report, WriteError, Writer,
+    batch_key, batch_seq, gc, now_ms, verify,
 };
 
 fn tmp(name: &str) -> PathBuf {
@@ -97,7 +99,7 @@ fn decision(action: &str) -> Entry {
     }
 }
 
-async fn new_stream<S: Store>(store: S) -> (Writer<S>, Key) {
+async fn new_stream<S: Store>(store: S) -> (Writer<S, Checkpoints>, Key) {
     let sk = Key::new_stream().unwrap();
     let w = Writer::create(
         store,
@@ -106,7 +108,17 @@ async fn new_stream<S: Store>(store: S) -> (Writer<S>, Key) {
     )
     .await
     .unwrap();
-    (w, sk)
+    (w.with_checkpoints(None).await.unwrap(), sk)
+}
+
+/// The stream in `store`, pinned, with the checkpoint hook.
+async fn open<S: Store>(store: S, pin: &str) -> Writer<S, Checkpoints> {
+    Writer::open(store, Some(pin))
+        .await
+        .unwrap()
+        .with_checkpoints(None)
+        .await
+        .unwrap()
 }
 
 async fn report<S: Store>(store: &S, pin: &str) -> Report {
@@ -218,7 +230,7 @@ async fn intent_outcome_rotation_revocation_and_reopen() {
         );
 
         // Reopened, the writer continues where the stream ends, with a certified session only.
-        let mut w = Writer::open(store.clone(), Some(&pin)).await.unwrap();
+        let mut w = open(store.clone(), &pin).await;
         assert!(matches!(
             w.append(Entry::new(Kind::Note)).await,
             Err(WriteError::NoSession(_))
@@ -254,7 +266,7 @@ async fn roll_forward_conflict_and_gc() {
         let (mut w1, sk) = new_stream(store.clone()).await;
         let pin = sk.fingerprint();
         let session = w1.session().unwrap().clone();
-        let mut w2 = Writer::open(store.clone(), Some(&pin)).await.unwrap();
+        let mut w2 = open(store.clone(), &pin).await;
         w2.use_session(session.clone()).unwrap();
 
         // Two writers with the same view: each batch has exactly one winner, nothing is lost.
@@ -265,7 +277,7 @@ async fn roll_forward_conflict_and_gc() {
 
         // A batch left by a crashed writer (written, HEAD not moved) is invisible, then rolled
         // forward.
-        let mut w3 = Writer::open(store.clone(), Some(&pin)).await.unwrap();
+        let mut w3 = open(store.clone(), &pin).await;
         w3.use_session(session.clone()).unwrap();
         let line = {
             let mut e = Entry {
@@ -355,7 +367,7 @@ async fn two_writers_race() {
     for (kind, store) in stores("race").await {
         let (w1, sk) = new_stream(store.clone()).await;
         let pin = sk.fingerprint();
-        let mut w2 = Writer::open(store.clone(), Some(&pin)).await.unwrap();
+        let mut w2 = open(store.clone(), &pin).await;
         w2.certify_session(
             &sk,
             Key::new_session(now_ms(), SESSION_LIFETIME_MS).unwrap(),
@@ -365,7 +377,7 @@ async fn two_writers_race() {
         let start = w2.chain().seq();
         // Both start each round together, so both go for the same sequence number every time.
         let barrier = Arc::new(tokio::sync::Barrier::new(2));
-        let run = |mut w: Writer<AnyStore>| {
+        let run = |mut w: Writer<AnyStore, Checkpoints>| {
             let barrier = barrier.clone();
             tokio::spawn(async move {
                 let mut out = vec![];
@@ -416,7 +428,7 @@ async fn group_commit_in_lanes() {
     for (kind, store) in stores("lanes").await {
         let (w1, sk) = new_stream(store.clone()).await;
         let pin = sk.fingerprint();
-        let mut w2 = Writer::open(store.clone(), Some(&pin)).await.unwrap();
+        let mut w2 = open(store.clone(), &pin).await;
         w2.certify_session(
             &sk,
             Key::new_session(now_ms(), SESSION_LIFETIME_MS).unwrap(),
@@ -511,7 +523,7 @@ async fn backpressure_fails_closed_after_the_deadline() {
         inner: LocalStore::open(&dir).unwrap(),
         delay: Duration::from_millis(300),
     };
-    let mut w = Writer::open(slow, Some(&sk.fingerprint())).await.unwrap();
+    let mut w = open(slow, &sk.fingerprint()).await;
     w.use_session(session).unwrap();
     let lane = Lane::spawn(
         w,
@@ -520,6 +532,7 @@ async fn backpressure_fails_closed_after_the_deadline() {
             linger: Duration::ZERO,
             queue: 1,
             deadline: Duration::from_millis(50),
+            ..LaneConfig::default()
         },
     );
     // The first is being written, the second fills the queue, the third finds no room.
@@ -547,14 +560,19 @@ async fn backpressure_fails_closed_after_the_deadline() {
 
 /// Records every commit it is told about.
 #[derive(Default)]
-struct Recorder(Vec<(u64, u64, u64, Vec<String>)>);
+struct Recorder(Vec<(u64, u64, u64, usize, String)>);
 
 impl<S: Store> Hook<S> for Recorder {
     async fn committed(&mut self, store: &S, c: Commit<'_>) {
-        // The batch is durable and under HEAD when the hook runs.
+        // The batch is durable and under HEAD when the hook runs, signed by a session key.
         assert!(store.get(&batch_key(c.first)).await.unwrap().is_some());
+        assert!(c.signer.is_some());
+        let last = format!(
+            "sha256:{}",
+            tenbri_core::encoding::hex(c.hashes.last().unwrap())
+        );
         self.0
-            .push((c.first, c.head.seq, c.head.counter, c.hashes.to_vec()));
+            .push((c.first, c.head.seq, c.head.counter, c.hashes.len(), last));
     }
 }
 
@@ -575,8 +593,12 @@ async fn hook_sees_every_commit_it_makes() {
             (3, 4, 5, 5)
         );
         assert_eq!(commits[1].2, commits[0].2 + 1, "the counter moves by one");
-        assert_eq!(commits[0].3.len(), 2);
-        assert_eq!(commits[1].3, [hash]);
+        assert_eq!(
+            (commits[0].3, commits[1].3),
+            (4, 5),
+            "the whole stream's hashes"
+        );
+        assert_eq!(commits[1].4, hash);
         assert!(r.iter().all(Result::is_ok) && e.seq == 5);
         assert_eq!(report(&store, &sk.fingerprint()).await.entries, 5);
     }
@@ -654,7 +676,7 @@ async fn crash_at_every_step() {
                     at,
                     after,
                 };
-                let mut w = Writer::open(crashing, Some(&pin)).await.unwrap();
+                let mut w = open(crashing, &pin).await;
                 w.use_session(session.clone()).unwrap();
                 let mut written = 0;
                 let result: Result<(), WriteError> = async {
@@ -679,7 +701,7 @@ async fn crash_at_every_step() {
                     "{step}: {r:?}"
                 );
 
-                let mut w = Writer::open(store.clone(), Some(&pin)).await.unwrap();
+                let mut w = open(store.clone(), &pin).await;
                 w.use_session(session).unwrap();
                 let e = w.append(Entry::new(Kind::Note)).await.unwrap();
                 let r = report(&store, &pin).await;
@@ -693,5 +715,134 @@ async fn crash_at_every_step() {
                 assert_eq!(r.entries, expected, "{step}");
             }
         }
+    }
+}
+
+fn notes(n: usize) -> Vec<Entry> {
+    (0..n).map(|_| Entry::new(Kind::Note)).collect()
+}
+
+/// Every 1,000 entries the writer puts a checkpoint signed by its session key, keeps a copy
+/// outside the store, and verify checks the stream against it.
+#[tokio::test]
+async fn checkpoints_every_thousand_entries() {
+    for (kind, store) in stores("checkpoints").await {
+        let local = tmp(&format!("checkpoints-local-{kind}")).join("checkpoint.note");
+        let (w, sk) = new_stream(store.clone()).await;
+        let mut w = w.with_checkpoints(Some(local.clone())).await.unwrap();
+        w.append_batch(notes(500)).await;
+        assert_eq!(w.hook().size(), 0, "{kind}: not due yet");
+        w.append_batch(notes(500)).await;
+        // 2 (genesis, session) + 1,000.
+        assert_eq!(w.hook().size(), 1002, "{kind}");
+        let note = store.get(&checkpoint::key(1002)).await.unwrap().unwrap();
+        assert_eq!(std::fs::read(&local).unwrap(), note.bytes);
+        let n = tenbri_merkle::Note::parse(&note.bytes).unwrap();
+        let session = w.session().unwrap().signing.verifying_key();
+        assert_eq!(n.signed_by(&session), Some(true), "{kind}");
+        w.append(Entry::new(Kind::Note)).await.unwrap();
+
+        let r = report(&store, &sk.fingerprint()).await;
+        assert_eq!(
+            (r.broken, r.entries, r.checkpoint),
+            (None, 1003, Some(1002)),
+            "{kind}"
+        );
+        // A reopened writer picks up where the last checkpoint was.
+        drop(w);
+        let w = open(store.clone(), &sk.fingerprint()).await;
+        let mut w = w.with_checkpoints(Some(local)).await.unwrap();
+        assert_eq!(w.hook().size(), 1002);
+        w.append_batch(notes(10)).await;
+        assert_eq!(w.hook().size(), 1002, "{kind}: 11 entries since, not due");
+    }
+}
+
+/// Someone with access to the store puts an older HEAD back and deletes the batches after it:
+/// the older HEAD is validly signed, so the stream alone still verifies once its checkpoints are
+/// gone too. The writer refuses to open below the checkpoint it keeps locally.
+#[tokio::test]
+async fn head_rolled_back_below_a_checkpoint_is_refused() {
+    for (kind, store) in stores("rollback").await {
+        let local = tmp(&format!("rollback-local-{kind}")).join("checkpoint.note");
+        let (w, sk) = new_stream(store.clone()).await;
+        let pin = sk.fingerprint();
+        let mut w = w.with_checkpoints(Some(local.clone())).await.unwrap();
+        w.append_batch(notes(3)).await;
+        let old = store.get("HEAD").await.unwrap().unwrap().bytes;
+        let old_seq = w.head().seq;
+        w.append_batch(notes(1000)).await;
+        assert_eq!(w.hook().size(), 1005, "{kind}");
+        drop(w);
+
+        // The rollback: HEAD swapped back, the batches after it deleted.
+        let now = store.get("HEAD").await.unwrap().unwrap();
+        assert!(matches!(
+            store
+                .compare_and_swap("HEAD", Some(&now.version), &old)
+                .await
+                .unwrap(),
+            Swap::Swapped(_)
+        ));
+        for l in store.list("batches/").await.unwrap() {
+            if batch_seq(&l.key).is_some_and(|s| s > old_seq) {
+                store.delete(&l.key).await.unwrap();
+            }
+        }
+        let truncated = |r: Result<Writer<AnyStore, Checkpoints>, WriteError>| matches!(r, Err(WriteError::Broken(b)) if b.error.code == Code::Truncated);
+
+        // The stream's own checkpoint is still there: verify and the writer both refuse.
+        let r = report(&store, &pin).await;
+        assert_eq!(r.broken.unwrap().error.code, Code::Truncated, "{kind}");
+        let w = Writer::open(store.clone(), Some(&pin)).await.unwrap();
+        assert!(truncated(w.with_checkpoints(None).await), "{kind}");
+
+        // Its checkpoints deleted as well, the stream verifies, but not against the local copy.
+        for l in store.list("checkpoints/").await.unwrap() {
+            store.delete(&l.key).await.unwrap();
+        }
+        let r = report(&store, &pin).await;
+        assert_eq!(
+            (r.broken, r.entries, r.checkpoint),
+            (None, old_seq, None),
+            "{kind}"
+        );
+        let w = Writer::open(store.clone(), Some(&pin)).await.unwrap();
+        assert!(
+            truncated(w.with_checkpoints(Some(local.clone())).await),
+            "{kind}"
+        );
+        // Without it, nothing tells; that is what the local copy is for.
+        let w = Writer::open(store.clone(), Some(&pin)).await.unwrap();
+        assert!(w.with_checkpoints(None).await.is_ok());
+    }
+}
+
+/// A lane closes intents open longer than `reconcile_after` in its next batch, but not one the
+/// batch holds the outcome of.
+#[tokio::test]
+async fn lane_reconciles_stale_intents() {
+    for (kind, store) in stores("lane-reconcile").await {
+        let (mut w, sk) = new_stream(store.clone()).await;
+        let mut old = decision("reply_ticket");
+        old.ts = tenbri_core::encoding::format_ts(now_ms() - 2 * 3_600_000);
+        let a = w.intent(old.clone()).await.unwrap();
+        let b = w.intent(old).await.unwrap();
+        let lane = Lane::spawn(w, LaneConfig::default());
+        let o = lane.outcome(&b, Status::Ok).await.unwrap();
+        let mut r = Reader::new(&store, Some(&sk.fingerprint()));
+        let entries = r.poll().await.unwrap();
+        let reconciled: Vec<_> = entries
+            .iter()
+            .filter(|e| e.kind == Kind::Reconcile)
+            .collect();
+        assert_eq!(reconciled.len(), 1, "{kind}");
+        assert_eq!(reconciled[0].intent.as_deref(), Some(a.id.as_str()));
+        assert_eq!(
+            reconciled[0].seq + 1,
+            o.seq,
+            "{kind}: in the same batch, first"
+        );
+        assert!(r.chain().open_intents().values().all(|o| o.reconciled));
     }
 }

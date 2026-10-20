@@ -98,6 +98,13 @@ note. A line that matches a known key MUST verify.
   `.note`: `checkpoints/000000002000.note`. It is written with put-if-absent and never rewritten.
   A checkpoint is not needed to read or verify a stream; one that is missing changes nothing.
 - A writer MUST NOT sign a checkpoint that is inconsistent with one it signed before.
+- The HEAD floor: a writer keeps the latest checkpoint it wrote outside the store (the reference
+  writer: `checkpoint.note` in the stream's key directory) and refuses to open a stream that fails
+  against it, or against the stream's own latest checkpoint, as section 4 checks. An older HEAD
+  put back by someone with access to the store fails with `truncated`; one put back after the
+  latest checkpoint is not detected.
+- `tenbri verify` checks the stream against its own latest checkpoint, as section 4, when it has
+  one.
 - Checkpoints only protect what they cover once someone outside the operator holds them: export
   them to auditors, or submit them to witnesses.
 
