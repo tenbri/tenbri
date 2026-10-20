@@ -93,6 +93,11 @@ An erasure is recorded in the stream as a `note` entry, written after the keys a
 A new key epoch is recorded the same way, with `action` `{type: "tenbri.key_epoch", target:
 "epoch:<n>"}`. Action types starting with `tenbri.` are reserved for the notes Tenbri writes.
 
+A derived query index holds subjects, targets and input refs in plaintext, so the erasure reaches it:
+it drops the subject's entries before the note, and keeps the note itself without its `subject`, so
+erasures stay listable by action. An index rebuilt from the stream does the same; the subject's
+entries after the note are indexed again.
+
 ## 5. The local key store
 
 The local key store (Stable) is a directory beside the stream's signing keys: `<keys

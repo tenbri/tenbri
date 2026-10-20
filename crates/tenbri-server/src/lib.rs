@@ -942,7 +942,7 @@ impl Lane {
                 hash: ix.entries[seq - 1].hash.clone(),
                 checkpoint,
             };
-            qx.append(&rows, &state)?;
+            tenbri_index::append(qx, rows, &state)?;
         }
         Ok(())
     }

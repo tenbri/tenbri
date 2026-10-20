@@ -3463,6 +3463,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tenbri-core",
+ "tenbri-crypt",
  "tenbri-keys",
  "tenbri-merkle",
  "tenbri-store",

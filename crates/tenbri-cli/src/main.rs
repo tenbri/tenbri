@@ -647,6 +647,8 @@ async fn erase(
 ) -> Result<u8, Fail> {
     let (store, ks) = open_stream(path, keys).await?;
     let data = DataKeys::open(&ks)?;
+    // No index directory: no index to erase from.
+    let ixdir = index_dir(&store).await.ok();
     // Open the writer first: a stream that does not verify, or no key to sign with, stops here,
     // before anything is deleted.
     let mut w = open_writer(store, ks).await?;
@@ -678,6 +680,23 @@ async fn erase(
                 ),
             )
         })?;
+    // The index holds the subject's refs and targets in plaintext: its rows go too. Rebuilds keep
+    // them out by the note just written.
+    if let (Some(s), Some(dir)) = (subject, &ixdir) {
+        if let Some(mut ix) = tenbri_index::find(dir)? {
+            ix.erase(s).map_err(|err| {
+                Fail(
+                    2,
+                    format!(
+                        "erasure recorded at seq {}, but the index at {} still holds subject {s}: \
+                         {err}; run tenbri index rebuild",
+                        e.seq,
+                        dir.display()
+                    ),
+                )
+            })?;
+        }
+    }
     println!(
         "erased {}: {n} data key epochs deleted; erasure recorded at seq {}",
         whose(subject),

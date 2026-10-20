@@ -166,10 +166,11 @@ impl ParquetIndex {
         .map_err(err)
     }
 
-    /// Writes `rows` (non-empty, consecutive) to a new file; returns its manifest entry.
+    /// Writes `rows` (non-empty, in sequence order) to a new file; returns its manifest entry.
     fn write(&self, rows: &[Row]) -> io::Result<FileMeta> {
         let (first, last) = (rows[0].seq, rows[rows.len() - 1].seq);
-        let name = format!("{first:012}-{last:012}.parquet");
+        // The row count tells a file rewritten by an erasure from the one it replaces.
+        let name = format!("{first:012}-{last:012}-{}.parquet", rows.len());
         let tmp = self.dir.join(format!("{name}.tmp"));
         let props = WriterProperties::builder()
             .set_compression(Compression::SNAPPY)
@@ -347,6 +348,44 @@ impl Backend for ParquetIndex {
             })?;
         }
         Ok(hits)
+    }
+
+    // ponytail: reads every file, as files hold no subject statistics; keep per-file subject sets
+    // in the manifest if erasures on large Parquet indexes are too slow.
+    fn erase(&mut self, subject: &str) -> io::Result<()> {
+        let mut m = self.manifest.clone();
+        let mut old = vec![];
+        let mut files = vec![];
+        for f in &m.files {
+            let mut rows = vec![];
+            let mut hit = false;
+            self.read(f, |mut r, lines, n| {
+                if r.subject.as_deref() == Some(subject) {
+                    hit = true;
+                } else {
+                    r.line = lines.value(n).to_owned();
+                    rows.push(r);
+                }
+            })?;
+            if !hit {
+                files.push(f.clone());
+                continue;
+            }
+            old.push(f.name.clone());
+            if !rows.is_empty() {
+                files.push(self.write(&rows)?);
+            }
+        }
+        if old.is_empty() {
+            return Ok(());
+        }
+        m.files = files;
+        self.save(&m)?;
+        self.manifest = m;
+        for name in old {
+            fs::remove_file(self.dir.join(name))?;
+        }
+        Ok(())
     }
 
     fn clear(&mut self) -> io::Result<()> {

@@ -1,5 +1,6 @@
 //! `tenbri erase` and `tenbri keys` through the binary: a body and a digest for a subject, the
-//! erasure refused without confirmation, then done, and the stream still verifying.
+//! erasure refused without confirmation, then done, the stream still verifying, and the subject
+//! gone from the query index.
 
 use std::io::Write;
 use std::path::Path;
@@ -13,6 +14,7 @@ fn tenbri(keys: &Path, args: &[&str], stdin: &str) -> Output {
     let mut c = Command::new(env!("CARGO_BIN_EXE_tenbri"))
         .arg("--keys")
         .arg(keys)
+        .env("TENBRI_INDEX_DIR", keys.with_file_name("index"))
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -84,6 +86,11 @@ async fn erase_and_keys() {
         "export needs --subject or --tenant"
     );
 
+    let by_subject = ["query", st, "--subject", "cust_42"];
+    let o = tenbri(&keys, &["index", "rebuild", st], "");
+    assert!(o.status.success(), "{o:?}");
+    assert!(out(&tenbri(&keys, &by_subject, "")).contains("cust_42"));
+
     // Not confirmed: nothing is erased or written.
     let erase = [
         "erase",
@@ -120,6 +127,18 @@ async fn erase_and_keys() {
     );
     assert!(out(&o).contains(r#""subject":"cust_42""#), "{o:?}");
     assert!(out(&o).contains(r#""target":"dsr:2026-1042""#), "{o:?}");
+    assert!(out(&o).contains(r#""verification":"indexed""#), "{o:?}");
+
+    // Gone from the index, and kept out by a rebuild.
+    for rebuild in [false, true] {
+        if rebuild {
+            let o = tenbri(&keys, &["index", "rebuild", st], "");
+            assert!(o.status.success(), "{o:?}");
+        }
+        let o = tenbri(&keys, &by_subject, "");
+        assert!(o.status.success(), "{o:?}");
+        assert_eq!(out(&o), "", "rebuilt: {rebuild}");
+    }
 
     std::fs::remove_dir_all(&t).unwrap();
 }

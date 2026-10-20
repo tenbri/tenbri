@@ -1,5 +1,6 @@
 //! The index on real streams: built incrementally as entries are appended, rebuilt after it is
-//! deleted, refusing a stream that no longer extends it, and current to the latest checkpoint.
+//! deleted, refusing a stream that no longer extends it, current to the latest checkpoint, and
+//! keeping erased subjects out.
 
 use std::path::{Path, PathBuf};
 
@@ -259,5 +260,99 @@ async fn current_to_a_checkpoint() {
         .unwrap();
     assert!(cp.is_some_and(|c| c >= 1000), "{cp:?}");
     assert_eq!(st.checkpoint, cp);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn subject(ix: &dyn Backend, s: &str) -> Vec<u64> {
+    let f = Filter {
+        subject: Some(s.into()),
+        ..Filter::default()
+    };
+    search(ix, &f, 1000)
+        .unwrap()
+        .hits
+        .iter()
+        .map(|h| h.seq)
+        .collect()
+}
+
+/// `tenbri erase` removes a subject's rows; updates and rebuilds keep them out once the stream
+/// records the erasure, and index the subject's later entries again.
+#[tokio::test]
+async fn erased_subjects_stay_out() {
+    let dir = tmp("erase");
+    let store = local(dir.join("s"));
+    let sk = Key::new_stream().unwrap();
+    let session = Key::new_session(now_ms(), SESSION_LIFETIME_MS).unwrap();
+    let mut w = Writer::create(store.clone(), &sk, session)
+        .await
+        .unwrap()
+        .with_checkpoints(None)
+        .await
+        .unwrap();
+    write(&mut w, 0, 10).await;
+    let mut ixs: Vec<_> = [Kind::Sqlite, Kind::Parquet]
+        .into_iter()
+        .map(|k| tenbri_index::open(k, &dir.join(format!("ix-{k}"))).unwrap())
+        .collect();
+    for ix in &mut ixs {
+        update(ix.as_mut(), &store).await.unwrap();
+        assert!(!subject(ix.as_ref(), "subj-1").is_empty());
+        let all = search(ix.as_ref(), &Filter::default(), 1000)
+            .unwrap()
+            .hits
+            .len();
+        let st = ix.state().unwrap();
+        ix.erase("subj-1").unwrap();
+        assert!(subject(ix.as_ref(), "subj-1").is_empty(), "{}", ix.kind());
+        let left = search(ix.as_ref(), &Filter::default(), 1000)
+            .unwrap()
+            .hits
+            .len();
+        assert!(left > 0 && left < all, "{}: {left} of {all}", ix.kind());
+        assert_eq!(ix.state().unwrap(), st);
+    }
+
+    // The erasure note: updates and rebuilds leave the subject out, and list the note.
+    let note = w
+        .append(tenbri_crypt::erasure_note(Some("subj-1"), "dsr:1", None))
+        .await
+        .unwrap();
+    let erasures = Filter {
+        action: Some("tenbri.erase".into()),
+        ..Filter::default()
+    };
+    for ix in &mut ixs {
+        for st in [
+            update(ix.as_mut(), &store).await.unwrap(),
+            tenbri_index::rebuild(ix.as_mut(), &store).await.unwrap(),
+        ] {
+            assert_eq!(st.seq, note.seq);
+            assert!(subject(ix.as_ref(), "subj-1").is_empty(), "{}", ix.kind());
+            let page = search(ix.as_ref(), &erasures, 10).unwrap();
+            assert_eq!(page.hits.len(), 1);
+            assert_eq!(page.hits[0].seq, note.seq);
+        }
+    }
+
+    // The subject's entries after the erasure are indexed, and survive a rebuild.
+    write(&mut w, 10, 20).await;
+    let after = scan(
+        &store,
+        &Filter {
+            subject: Some("subj-1".into()),
+            after: note.seq,
+            ..Filter::default()
+        },
+    )
+    .await;
+    assert!(!after.is_empty());
+    let after: Vec<u64> = after.into_iter().map(|(seq, _)| seq).collect();
+    for ix in &mut ixs {
+        update(ix.as_mut(), &store).await.unwrap();
+        assert_eq!(subject(ix.as_ref(), "subj-1"), after, "{}", ix.kind());
+        tenbri_index::rebuild(ix.as_mut(), &store).await.unwrap();
+        assert_eq!(subject(ix.as_ref(), "subj-1"), after, "{}", ix.kind());
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
