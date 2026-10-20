@@ -1,0 +1,5 @@
+# cargo audit (ci.yml's audit job). Keep in step with deny.toml's [advisories] ignore.
+[advisories]
+# Marvin: timing leaks in RSA decryption and signing with a private key. tenbri-anchor only
+# verifies RSA signatures of timestamp authorities, with public keys; no fixed rsa release yet.
+ignore = ["RUSTSEC-2023-0071"]

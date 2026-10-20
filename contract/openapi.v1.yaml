@@ -261,6 +261,42 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
       security:
       - token: []
+  /v1/streams/{stream}/entries/{id}/receipt:
+    get:
+      summary: |-
+        A receipt for one entry: a self-contained proof, checked offline against the stream's pinned
+        key with `tenbri receipt verify` (spec/receipts.md). It holds the entry, the stream's key
+        history, a signed checkpoint covering them with their inclusion proofs, and the checkpoint's
+        RFC 3161 token if it has one. If no checkpoint covers the entry yet, tenbrid seals one first.
+      operationId: get_receipt
+      parameters:
+      - name: stream
+        in: path
+        description: The stream's name or id
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        description: The entry id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The receipt (spec/receipts.md), canonical JSON
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
   /v1/streams/{stream}/intents:
     post:
       summary: Append an intent; returns once it is durable, before the action runs.

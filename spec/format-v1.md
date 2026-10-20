@@ -243,7 +243,7 @@ HEAD signature, and the reverse.
   HEAD                              compare-and-swap
   batches/000000000001.jsonl        named by first seq; written once, never rewritten
   checkpoints/000000002000.note     checkpoints.md, section 3
-  anchors/000000002000.tsr          reserved
+  anchors/000000002000.tsr          RFC 3161 token, receipts.md, section 5
   blobs/ct-sha256/ab/cd…            privacy.md, section 2
 ```
 
@@ -301,7 +301,8 @@ Detected: any edit, including whitespace; reordering, insertion and deletion bef
 entries; entries signed by an expired, revoked, uncertified or wrong key. Not detected in format v1
 without checkpoints: truncation of the tail together with a rewritten HEAD by a key holder, and a
 full rewrite by the stream key holder. [Checkpoints](checkpoints.md) held outside the operator
-close that gap for the entries they cover (*reserved*: receipts, anchors).
+close that gap for the entries they cover; [receipts](receipts.md) prove single entries against
+them offline, and RFC 3161 tokens give them independent time.
 
 ## 10. Error codes
 
@@ -333,3 +334,4 @@ close that gap for the entries they cover (*reserved*: receipts, anchors).
 | `bad_batch` | A batch file that breaks the layout rules |
 | `missing_batch` | A batch HEAD needs is absent |
 | `bad_checkpoint`, `truncated`, `fork` | A checkpoint's failures ([checkpoints.md](checkpoints.md#5-error-codes)) |
+| `bad_receipt`, `bad_proof`, `bad_timestamp` | A receipt's failures ([receipts.md](receipts.md#6-error-codes)) |

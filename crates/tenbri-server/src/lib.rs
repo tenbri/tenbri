@@ -2,8 +2,8 @@
 //!
 //! One [`Daemon`] holds a writer per configured stream (a lane) and serves the same operations
 //! over REST (`/v1`, [`openapi_yaml`]) and gRPC (`tenbri.v1.TenbriService`, [`proto`]): append
-//! intents, outcomes, approvals and batches; get, query and tail entries; verify a stream; list
-//! the action schemas; health and readiness.
+//! intents, outcomes, approvals and batches; get, query and tail entries; receipts; verify a
+//! stream; list the action schemas; health and readiness.
 //!
 //! - Every write carries an idempotency key, the entry id: the same key and draft return the
 //!   original entry, the same key with another draft is `TENBRI_IDEMPOTENCY_CONFLICT`.
@@ -17,6 +17,8 @@
 //! - An intent's durability: `local` on local disk; `replicated` (the default) or `local` on an
 //!   object store, where every write is replicated before it returns.
 //! - Every request but health checks needs a bearer token, bound to one principal.
+//! - With `[anchor]` configured, the latest checkpoint of every stream is timestamped by an RFC 3161
+//!   authority every hour (by default), and receipts carry the token.
 //! - Shutdown stops accepting requests, ends tails, and waits for the writes in flight.
 
 mod config;
@@ -40,6 +42,7 @@ use tenbri_core::{
     sign,
 };
 use tenbri_keys::KeyStore;
+use tenbri_merkle::checkpoint;
 use tenbri_schema::Schemas;
 use tenbri_store::{AnyStore, Store};
 use tenbri_writer::{CHECKPOINT_FILE, LaneConfig, Reader, WriteError, Writer, draft_from_json};
@@ -47,7 +50,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, broadcast, watch};
 use tokio_stream::wrappers::BroadcastStream;
 
-pub use config::{Config, StreamConfig, TokenConfig};
+pub use config::{AnchorConfig, Config, StreamConfig, TokenConfig};
 pub use error::{ApiError, ErrorBody, ErrorCode, Violation};
 pub use rest::openapi_yaml;
 
@@ -434,6 +437,55 @@ impl Daemon {
                     (s, v)
                 })
             }))
+    }
+
+    /// A receipt for the entry `id` (spec/receipts.md): the file `tenbri receipt verify` checks.
+    pub async fn receipt(
+        &self,
+        token: &Token,
+        stream: &str,
+        id: &str,
+    ) -> Result<Vec<u8>, ApiError> {
+        let lane = self.lane(token, stream)?;
+        if !lane.index.read().expect("index lock").ids.contains_key(id) {
+            return Err(ApiError::new(ErrorCode::NotFound, format!("no entry {id}")));
+        }
+        let make = || tenbri_writer::receipt(&lane.store, Some(&lane.pin), |e| e.id == id);
+        match make().await {
+            // No checkpoint covers it yet: seal one now rather than make the caller wait for it.
+            Err(tenbri_writer::ReceiptError::NotCheckpointed(_)) => {
+                lane.writer.seal().await;
+                Ok(make().await?)
+            }
+            r => Ok(r?),
+        }
+    }
+
+    /// Timestamps the latest checkpoint of every stream that has none yet with the TSA at `url`;
+    /// what [`Daemon::anchor_every`] runs. Returns the store keys of the tokens written.
+    pub async fn anchor(&self, url: &str) -> Vec<String> {
+        let mut written = vec![];
+        for lane in self.lanes.values() {
+            match anchor(&lane.store, url).await {
+                Ok(Some(k)) => written.push(k),
+                Ok(None) => {}
+                Err(e) => eprintln!("tenbrid: stream {}: timestamping: {e}", lane.name),
+            }
+        }
+        written
+    }
+
+    /// Runs [`Daemon::anchor`] every `every` until shutdown, if `[anchor]` is configured.
+    pub async fn anchor_every(&self, config: &Config) {
+        let Some(a) = &config.anchor else { return };
+        let mut stop = self.shutdown.subscribe();
+        let mut tick = tokio::time::interval(Duration::from_secs(a.every_s));
+        loop {
+            tokio::select! {
+                _ = tick.tick() => { self.anchor(&a.tsa).await; }
+                _ = async { stop.wait_for(|s| *s).await.is_ok() } => return,
+            }
+        }
     }
 
     /// Reads the stream from storage and checks all of it against its pinned key.
@@ -860,6 +912,21 @@ fn same(draft: &Entry, stored: &Entry) -> bool {
         d.trace.clone_from(&stored.trace);
     }
     d == *stored
+}
+
+/// Timestamps the store's latest checkpoint unless it already has a token; the token's key.
+async fn anchor(store: &AnyStore, url: &str) -> std::io::Result<Option<String>> {
+    let Some((size, note)) = tenbri_writer::latest_checkpoint(store).await? else {
+        return Ok(None);
+    };
+    let key = checkpoint::anchor_key(size);
+    if store.get(&key).await?.is_some() {
+        return Ok(None);
+    }
+    let note = tenbri_merkle::Note::parse(&note).map_err(std::io::Error::other)?;
+    let tsr = tenbri_anchor::timestamp(url, note.text().as_bytes()).await?;
+    store.put_if_absent(&key, &tsr).await?;
+    Ok(Some(key))
 }
 
 /// A `key` value as a fingerprint: `sha256:…` as given, or the fingerprint of `ed25519:…`.

@@ -28,6 +28,12 @@ pub fn key(size: u64) -> String {
     format!("checkpoints/{size:012}.note")
 }
 
+/// The store key of an RFC 3161 timestamp response over the checkpoint at `size`, next to it:
+/// `anchors/000000002000.tsr` (spec/receipts.md, section 5).
+pub fn anchor_key(size: u64) -> String {
+    format!("anchors/{size:012}.tsr")
+}
+
 /// The C2SP key ID: the first four bytes of SHA-256(name || 0x0A || 0x01 || public key).
 pub fn key_id(name: &str, key: &VerifyingKey) -> [u8; 4] {
     let mut h = Sha256::new();
@@ -223,7 +229,9 @@ impl Note {
         Ok(now)
     }
 
-    fn check_signer(&self, chain: &Chain) -> Result<(), Error> {
+    /// Checks the stream's signature: a session key `chain` certified by the checkpoint's size,
+    /// not revoked by then, signed it (section 4's signer rows).
+    pub fn check_signer(&self, chain: &Chain) -> Result<(), Error> {
         let size = self.checkpoint.size;
         let mut first_err = None;
         for (id, k) in chain.keys() {
