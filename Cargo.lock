@@ -1476,6 +1476,7 @@ dependencies = [
  "napi-sys",
  "nohash-hasher",
  "rustc-hash",
+ "tokio",
 ]
 
 [[package]]
@@ -2644,6 +2645,19 @@ name = "tenbri-anchor"
 version = "0.1.0-alpha.2"
 
 [[package]]
+name = "tenbri-bindings"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tenbri-core",
+ "tenbri-keys",
+ "tenbri-store",
+ "tenbri-writer",
+ "tokio",
+]
+
+[[package]]
 name = "tenbri-cli"
 version = "0.1.0-alpha.2"
 dependencies = [
@@ -2735,6 +2749,8 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "serde_json",
+ "tenbri-bindings",
 ]
 
 [[package]]
@@ -2754,6 +2770,8 @@ name = "tenbri-py"
 version = "0.1.0-alpha.2"
 dependencies = [
  "pyo3",
+ "tenbri-bindings",
+ "tokio",
 ]
 
 [[package]]

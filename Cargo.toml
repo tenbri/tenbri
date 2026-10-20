@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "bindings/python", "bindings/node", "bindings/wasm"]
+members = ["crates/*", "bindings/common", "bindings/python", "bindings/node", "bindings/wasm"]
 
 # One version for every crate, the Python package and the npm packages. Release Please moves it
 # (release-please-config.json); nobody edits it by hand.
