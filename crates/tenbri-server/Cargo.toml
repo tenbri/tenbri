@@ -22,8 +22,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 serde_urlencoded = "0.7"
 sha2 = "0.11"
+tenbri-anchor = { workspace = true, features = ["client"] }
 tenbri-core.workspace = true
 tenbri-keys.workspace = true
+tenbri-merkle.workspace = true
 tenbri-schema.workspace = true
 tenbri-store = { workspace = true, features = ["s3"] }
 tenbri-writer.workspace = true
@@ -40,6 +42,7 @@ utoipa = { version = "5", features = ["yaml"] }
 protox = "0.9"
 tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+tenbri-anchor = { workspace = true, features = ["test-tsa"] }
 tonic = { version = "0.14", default-features = false, features = ["channel"] }
 
 [lints]

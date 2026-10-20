@@ -194,6 +194,16 @@ impl TenbriService for Grpc {
         }))
     }
 
+    async fn get_receipt(
+        &self,
+        r: Request<pb::GetReceiptRequest>,
+    ) -> Result<Response<pb::GetReceiptResponse>, Status> {
+        let t = self.caller(r.metadata())?;
+        let q = r.get_ref();
+        let receipt = self.0.receipt(&t, &q.stream, &q.id).await.map_err(status)?;
+        Ok(Response::new(pb::GetReceiptResponse { receipt }))
+    }
+
     async fn query_entries(
         &self,
         r: Request<pb::QueryEntriesRequest>,

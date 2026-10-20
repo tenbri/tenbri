@@ -8,7 +8,7 @@ info:
 
     Every write carries an `Idempotency-Key`: the entry id, a ULID the client generates. The same key with the same draft returns the original entry (200, `replayed: true`); the same key with another draft fails with TENBRI_IDEMPOTENCY_CONFLICT. Batches carry each entry's `id` instead.
 
-    Errors have one body, `{"error": {"code", "message", "reason"?, "violations"?}}`, with a stable code: TENBRI_INVALID_REQUEST (400), TENBRI_INVALID_ENTRY (400, `reason` is the format v1 code), TENBRI_SCHEMA_VIOLATION (422), TENBRI_UNAUTHENTICATED (401), TENBRI_FORBIDDEN (403), TENBRI_NOT_FOUND (404), TENBRI_IDEMPOTENCY_CONFLICT (409), TENBRI_WRITE_CONFLICT (409), TENBRI_DEADLINE_EXCEEDED (503, backpressure), TENBRI_STORE_UNAVAILABLE (503), TENBRI_NO_SESSION_KEY (503), TENBRI_TAIL_LAGGED (503), TENBRI_STREAM_BROKEN (500), TENBRI_INTERNAL (500). A 503 carries Retry-After.
+    Errors have one body, `{"error": {"code", "message", "reason"?, "violations"?}}`, with a stable code: TENBRI_INVALID_REQUEST (400), TENBRI_INVALID_ENTRY (400, `reason` is the format v1 code), TENBRI_SCHEMA_VIOLATION (422), TENBRI_UNAUTHENTICATED (401), TENBRI_FORBIDDEN (403), TENBRI_NOT_FOUND (404), TENBRI_IDEMPOTENCY_CONFLICT (409), TENBRI_WRITE_CONFLICT (409), TENBRI_DEADLINE_EXCEEDED (503, backpressure), TENBRI_STORE_UNAVAILABLE (503), TENBRI_NO_SESSION_KEY (503), TENBRI_TAIL_LAGGED (503), TENBRI_NOT_CHECKPOINTED (503), TENBRI_STREAM_BROKEN (500), TENBRI_INTERNAL (500). A 503 carries Retry-After.
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -237,6 +237,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QueriedBody'
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
+  /v1/streams/{stream}/entries/{id}/receipt:
+    get:
+      summary: |-
+        A receipt for one entry: a self-contained proof, checked offline against the stream's pinned
+        key with `tenbri receipt verify` (spec/receipts.md). It holds the entry, the stream's key
+        history, a signed checkpoint covering them with their inclusion proofs, and the checkpoint's
+        RFC 3161 token if it has one. TENBRI_NOT_CHECKPOINTED until a checkpoint covers the entry
+        (within 60 seconds of a write).
+      operationId: get_receipt
+      parameters:
+      - name: stream
+        in: path
+        description: The stream's name or id
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        description: The entry id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The receipt (spec/receipts.md), canonical JSON
+          content:
+            application/json:
+              schema:
+                type: object
         default:
           description: An error
           content:
@@ -514,6 +551,7 @@ components:
       - TENBRI_NO_SESSION_KEY
       - TENBRI_STREAM_BROKEN
       - TENBRI_TAIL_LAGGED
+      - TENBRI_NOT_CHECKPOINTED
       - TENBRI_INTERNAL
     QueriedBody:
       type: object

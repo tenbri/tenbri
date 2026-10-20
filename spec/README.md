@@ -9,10 +9,12 @@ implementation, not the definition. A tool that follows this spec can read and v
 with no Tenbri binary at all.
 
 - [format-v1.md](format-v1.md): entries, canonical bytes (RFC 8785), the hash chain, signatures
-  with domain separation, keys, HEAD, the storage layout and the write protocol. Receipts and
-  links land in later pre-releases.
+  with domain separation, keys, HEAD, the storage layout and the write protocol. Links land in a
+  later pre-release.
 - [checkpoints.md](checkpoints.md): the RFC 6962 Merkle tree over entry hashes, inclusion and
   consistency proofs, checkpoints as C2SP signed notes, and verifying a stream against one.
+- [receipts.md](receipts.md): receipts, self-contained proofs that entries are in a stream,
+  checked offline against a pinned key, and RFC 3161 timestamps of checkpoints.
 - [vectors/](vectors/README.md): the conformance test vectors.
 
 ## Versioning

@@ -45,7 +45,8 @@ a stable code: TENBRI_INVALID_REQUEST (400), TENBRI_INVALID_ENTRY (400, `reason`
 v1 code), TENBRI_SCHEMA_VIOLATION (422), TENBRI_UNAUTHENTICATED (401), TENBRI_FORBIDDEN (403), \
 TENBRI_NOT_FOUND (404), TENBRI_IDEMPOTENCY_CONFLICT (409), TENBRI_WRITE_CONFLICT (409), \
 TENBRI_DEADLINE_EXCEEDED (503, backpressure), TENBRI_STORE_UNAVAILABLE (503), \
-TENBRI_NO_SESSION_KEY (503), TENBRI_TAIL_LAGGED (503), TENBRI_STREAM_BROKEN (500), \
+TENBRI_NO_SESSION_KEY (503), TENBRI_TAIL_LAGGED (503), TENBRI_NOT_CHECKPOINTED (503), \
+TENBRI_STREAM_BROKEN (500), \
 TENBRI_INTERNAL (500). A 503 carries Retry-After.",
         license(name = "Apache-2.0", identifier = "Apache-2.0"),
     ),
@@ -85,6 +86,7 @@ fn api() -> (axum::Router<Arc<Daemon>>, utoipa::openapi::OpenApi) {
     a = route::<__path_append_batch, _, _>(a, append_batch);
     a = route::<__path_query_entries, _, _>(a, query_entries);
     a = route::<__path_get_entry, _, _>(a, get_entry);
+    a = route::<__path_get_receipt, _, _>(a, get_receipt);
     a = route::<__path_tail_entries, _, _>(a, tail_entries);
     a = route::<__path_verify_stream, _, _>(a, verify_stream);
     a = route::<__path_list_schemas, _, _>(a, list_schemas);
@@ -476,6 +478,33 @@ async fn get_entry(
     Path((stream, id)): Path<(String, String)>,
 ) -> Result<Json<QueriedBody>, ApiError> {
     Ok(Json(queried(d.get(&t, &stream, &id)?)))
+}
+
+/// A receipt for one entry: a self-contained proof, checked offline against the stream's pinned
+/// key with `tenbri receipt verify` (spec/receipts.md). It holds the entry, the stream's key
+/// history, a signed checkpoint covering them with their inclusion proofs, and the checkpoint's
+/// RFC 3161 token if it has one. TENBRI_NOT_CHECKPOINTED until a checkpoint covers the entry
+/// (within 60 seconds of a write).
+#[utoipa::path(
+    get,
+    path = "/v1/streams/{stream}/entries/{id}/receipt",
+    params(
+        ("stream" = String, Path, description = "The stream's name or id"),
+        ("id" = String, Path, description = "The entry id"),
+    ),
+    responses(
+        (status = 200, description = "The receipt (spec/receipts.md), canonical JSON", body = Object, content_type = "application/json"),
+        (status = "default", description = "An error", body = ErrorBody),
+    ),
+    security(("token" = [])),
+)]
+async fn get_receipt(
+    State(d): State<Arc<Daemon>>,
+    Caller(t): Caller,
+    Path((stream, id)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    let r = d.receipt(&t, &stream, &id).await?;
+    Ok(([(header::CONTENT_TYPE, "application/json")], r).into_response())
 }
 
 /// Server-sent events: the entries after `after_seq` (or the Last-Event-ID header), then new ones

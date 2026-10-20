@@ -4,7 +4,8 @@
 //! `--checkpoint` given (truncated behind it, rewritten, or not signed by the stream); the first
 //! broken sequence number is printed; 2 any other error, a malformed checkpoint file among them;
 //! 3 `verify` without `--key`: the stream is consistent with its own genesis key, which proves
-//! nothing about who wrote it; `schema check` exits 1 when an entry breaks its action's schema.
+//! nothing about who wrote it; `schema check` exits 1 when an entry breaks its action's schema;
+//! `receipt verify` exits 1 when the receipt does not verify, with the reason.
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -14,11 +15,12 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use tenbri_core::{Entry, Head, Role, canon, sign};
 use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
-use tenbri_merkle::Note;
+use tenbri_merkle::{Note, checkpoint};
 use tenbri_schema::{Schemas, Unknown};
 use tenbri_store::{AnyStore, Store};
 use tenbri_writer::{
-    CHECKPOINT_FILE, RECONCILE_AFTER_MS, ReadError, Reader, Writer, draft_from_json, now_ms, verify,
+    CHECKPOINT_FILE, Checkpoints, RECONCILE_AFTER_MS, ReadError, Reader, ReceiptError, Writer,
+    draft_from_json, now_ms, verify,
 };
 
 #[derive(Parser)]
@@ -84,10 +86,52 @@ enum Command {
         #[arg(long, value_name = "FINGERPRINT")]
         key: Option<String>,
     },
+    /// Seal and sign a checkpoint of the whole stream now; with --tsa, timestamp it (RFC 3161).
+    Checkpoint {
+        path: String,
+        /// The URL of an RFC 3161 timestamp authority: its token is stored next to the
+        /// checkpoint (anchors/<size>.tsr) and goes into receipts.
+        #[arg(long, value_name = "URL")]
+        tsa: Option<String>,
+    },
+    /// Receipts: a self-contained proof that entries are in a stream.
+    Receipt {
+        #[command(subcommand)]
+        command: ReceiptCommand,
+    },
     /// Action schemas (tenbri.toml).
     Schema {
         #[command(subcommand)]
         command: SchemaCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ReceiptCommand {
+    /// Write a receipt for entries of a stream: the entries, the stream's key history, a signed
+    /// checkpoint covering them and their inclusion proofs, and its RFC 3161 token if it has one.
+    Create {
+        path: String,
+        /// An entry's sequence number or id; repeat for a receipt proving several.
+        #[arg(long, required = true, value_name = "SEQ|ID")]
+        entry: Vec<String>,
+        /// Where to write it [default: stdout].
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+        /// Check the stream against this fingerprint while reading it.
+        #[arg(long, value_name = "FINGERPRINT")]
+        key: Option<String>,
+    },
+    /// Check a receipt offline against a pinned stream key: no network, no access to the stream.
+    Verify {
+        file: PathBuf,
+        /// Fingerprint (sha256:…) or public key (ed25519:…) of the stream's genesis key.
+        #[arg(long, value_name = "FINGERPRINT")]
+        key: String,
+        /// The timestamp authorities' root certificates you trust (PEM); without it, RFC 3161
+        /// tokens in the receipt are not checked.
+        #[arg(long, value_name = "PEM")]
+        tsa_roots: Option<PathBuf>,
     },
 }
 
@@ -272,10 +316,138 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
                 print_lines(&read(&mut r).await?)?;
             }
         }
+        Command::Checkpoint { path, tsa } => checkpoint(path, &keys_dir()?, tsa.as_deref()).await,
+        Command::Receipt {
+            command:
+                ReceiptCommand::Create {
+                    path,
+                    entry,
+                    out,
+                    key,
+                },
+        } => {
+            let pin = key.as_deref().map(pin).transpose()?;
+            let store = store(path).await?;
+            let wanted = |e: &Entry| entry.iter().any(|w| *w == e.id || w.parse() == Ok(e.seq));
+            let r = tenbri_writer::receipt(&store, pin.as_deref(), wanted)
+                .await
+                .map_err(|e| match e {
+                    ReceiptError::Read(ReadError::Broken(b)) => {
+                        Fail(1, format!("the stream does not verify: {b}"))
+                    }
+                    e => Fail(2, e.to_string()),
+                })?;
+            match out {
+                Some(f) => {
+                    std::fs::write(f, &r).map_err(|e| Fail(2, format!("{}: {e}", f.display())))?
+                }
+                None => io::stdout().write_all(&r)?,
+            }
+            Ok(0)
+        }
+        Command::Receipt {
+            command:
+                ReceiptCommand::Verify {
+                    file,
+                    key,
+                    tsa_roots,
+                },
+        } => receipt_verify(file, &pin(key)?, tsa_roots.as_deref()),
         Command::Schema {
             command: SchemaCommand::Check { paths, schema },
         } => schema_check(schema, paths).await,
     }
+}
+
+fn receipt_verify(file: &Path, pin: &str, tsa_roots: Option<&Path>) -> Result<u8, Fail> {
+    let at = |p: &Path, e: &dyn std::fmt::Display| Fail(2, format!("{}: {e}", p.display()));
+    let bytes = std::fs::read(file).map_err(|e| at(file, &e))?;
+    let roots = tsa_roots
+        .map(|p| {
+            std::fs::read(p)
+                .map_err(|e| at(p, &e))
+                .and_then(|b| tenbri_anchor::parse_roots(&b).map_err(|e| at(p, &e)))
+        })
+        .transpose()?;
+    let v = match tenbri_anchor::verify_receipt(&bytes, pin, roots.as_deref()) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("receipt does not verify: {e}");
+            return Ok(1);
+        }
+    };
+    let r = &v.receipt;
+    let cp = &r.checkpoint;
+    for e in r.proved() {
+        println!(
+            "proves seq {} ({}), id {}, ts {} (claimed by the writer)",
+            e.seq,
+            kind(e),
+            e.id,
+            e.ts
+        );
+    }
+    println!(
+        "in stream {}, checkpoint at size {}, pinned to {pin}; key history: {} key entries",
+        cp.origin,
+        cp.size,
+        r.entries
+            .iter()
+            .filter(|e| e.kind == tenbri_core::Kind::Key)
+            .count()
+    );
+    match &v.timestamps {
+        Some(ts) => {
+            for t in ts {
+                println!(
+                    "timestamped by {} at {} (RFC 3161): the checkpoint existed then",
+                    t.tsa,
+                    tenbri_anchor::rfc3339(t.unix)
+                );
+            }
+        }
+        None if !r.rfc3161.is_empty() => println!(
+            "{} RFC 3161 token(s) NOT checked: pass --tsa-roots <pem> to trust a timestamp authority",
+            r.rfc3161.len()
+        ),
+        None => {}
+    }
+    Ok(0)
+}
+
+/// An entry's kind, and its phase if it has one: `decision intent`.
+fn kind(e: &Entry) -> String {
+    let name = |v: Result<canon::Value, _>| match v {
+        Ok(canon::Value::Str(s)) => s,
+        _ => "?".into(),
+    };
+    let k = name(canon::from_serialize(&e.kind));
+    match &e.phase {
+        Some(p) => format!("{k} {}", name(canon::from_serialize(p))),
+        None => k,
+    }
+}
+
+async fn checkpoint(path: &str, keys: &Path, tsa: Option<&str>) -> Result<u8, Fail> {
+    let mut w = open_writer(path, keys).await?;
+    let size = w.checkpoint().await?;
+    println!("checkpoint at size {size}: {}", checkpoint::key(size));
+    let Some(url) = tsa else { return Ok(0) };
+    let anchor = checkpoint::anchor_key(size);
+    if w.store().get(&anchor).await?.is_some() {
+        println!("already timestamped: {anchor}");
+        return Ok(0);
+    }
+    let note = w
+        .store()
+        .get(&checkpoint::key(size))
+        .await?
+        .ok_or_else(|| Fail(2, format!("{} vanished", checkpoint::key(size))))?;
+    let text = Note::parse(&note.bytes)?.text().to_owned();
+    let tsr = tenbri_anchor::timestamp(url, text.as_bytes()).await?;
+    w.store().put_if_absent(&anchor, &tsr).await?;
+    println!("timestamped by {url}: {anchor}");
+    Ok(0)
 }
 
 async fn schema_check(file: &Path, paths: &[String]) -> Result<u8, Fail> {
@@ -415,6 +587,19 @@ async fn append(path: &str, keys: &Path) -> Result<u8, Fail> {
     let mut input = vec![];
     io::stdin().read_to_end(&mut input)?;
     let draft = draft_from_json(&input).map_err(|e| Fail(2, format!("stdin: {e}")))?;
+    let mut w = open_writer(path, keys).await?;
+    let now = now_ms();
+    w.reconcile_stale(now, RECONCILE_AFTER_MS, draft.intent.as_deref())
+        .await?;
+    let e = w.append(draft).await?;
+    println!("{}", line(&e));
+    Ok(0)
+}
+
+/// The stream's writer, pinned to the genesis key this machine holds, checkpointing, with a
+/// session key: a stored one the stream certified, valid for at least another minute, else a new
+/// one certified with the current stream key.
+async fn open_writer(path: &str, keys: &Path) -> Result<Writer<AnyStore, Checkpoints>, Fail> {
     let store = store(path).await?;
     let head = store
         .get("HEAD")
@@ -444,13 +629,6 @@ async fn append(path: &str, keys: &Path) -> Result<u8, Fail> {
         .await?
         .with_checkpoints(Some(ks.dir().join(CHECKPOINT_FILE)))
         .await?;
-    // A stored session the stream certified, valid for at least another minute; else a new one
-    // certified with the current stream key.
     w.use_keys(ks).await?;
-    let now = now_ms();
-    w.reconcile_stale(now, RECONCILE_AFTER_MS, draft.intent.as_deref())
-        .await?;
-    let e = w.append(draft).await?;
-    println!("{}", line(&e));
-    Ok(0)
+    Ok(w)
 }

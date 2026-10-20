@@ -5,10 +5,11 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use tenbri_core::{Broken, Chain, Code, Error};
+use tenbri_keys::Key;
 use tenbri_merkle::{Hash, Note, checkpoint};
-use tenbri_store::{Put, Store};
+use tenbri_store::Store;
 
-use crate::{Commit, Hook, WriteError, Writer};
+use crate::{Commit, Hook, WriteError, Writer, signer};
 
 /// The file name `tenbri` and tenbrid keep the latest checkpoint under, in the stream's key
 /// directory.
@@ -33,24 +34,51 @@ impl Checkpoints {
     }
 }
 
+impl Checkpoints {
+    /// Signs and stores the checkpoint of the whole stream, and keeps it at `local`.
+    async fn write<S: Store>(&mut self, store: &S, c: &Commit<'_>, key: &Key) -> io::Result<()> {
+        let size = c.hashes.len() as u64;
+        let note = checkpoint::sign(&c.head.stream, c.hashes, &key.signing);
+        // Exists: another writer checkpointed the same entries.
+        store.put_if_absent(&checkpoint::key(size), &note).await?;
+        if let Some(p) = &self.local {
+            keep(p, &note)?;
+        }
+        (self.size, self.since) = (size, Instant::now());
+        Ok(())
+    }
+}
+
 impl<S: Store> Hook<S> for Checkpoints {
     async fn committed(&mut self, store: &S, c: Commit<'_>) {
         let Some(key) = c.signer else { return };
         let size = c.hashes.len() as u64;
         let ms = self.since.elapsed().as_millis() as u64;
-        if !checkpoint::due(size.saturating_sub(self.size), ms) {
-            return;
+        if checkpoint::due(size.saturating_sub(self.size), ms) {
+            // On an error the next commit tries again; the entries are durable whatever happens.
+            let _ = self.write(store, &c, key).await;
         }
-        let note = checkpoint::sign(&c.head.stream, c.hashes, &key.signing);
-        // Exists: another writer checkpointed the same entries. On an error the next commit tries
-        // again; the entries are durable whatever happens here.
-        let stored = matches!(
-            store.put_if_absent(&checkpoint::key(size), &note).await,
-            Ok(Put::Created | Put::Exists)
-        );
-        if stored && self.local.as_ref().is_none_or(|p| keep(p, &note).is_ok()) {
-            (self.size, self.since) = (size, Instant::now());
+    }
+}
+
+impl<S: Store> Writer<S, Checkpoints> {
+    /// Signs and stores a checkpoint of the whole stream now, unless the latest one already
+    /// covers it (`tenbri checkpoint`). Returns its size.
+    pub async fn checkpoint(&mut self) -> Result<u64, WriteError> {
+        let size = self.hashes.len() as u64;
+        if self.hook.size == size {
+            return Ok(size);
         }
+        let key = signer(&self.chain, self.session.as_ref())
+            .ok_or_else(|| WriteError::NoSession("no session key may sign a checkpoint".into()))?;
+        let c = Commit {
+            head: &self.head,
+            first: self.head.seq + 1,
+            hashes: &self.hashes,
+            signer: Some(key),
+        };
+        self.hook.write(&self.store, &c, key).await?;
+        Ok(size)
     }
 }
 
@@ -66,7 +94,7 @@ impl<S: Store, H> Writer<S, H> {
         local: Option<PathBuf>,
     ) -> Result<Writer<S, Checkpoints>, WriteError> {
         let mut size = 0;
-        if let Some((at, bytes)) = latest(&self.store).await? {
+        if let Some((at, bytes)) = latest_checkpoint(&self.store).await? {
             size =
                 check(&bytes, Some(at), &self.chain, &self.hashes).map_err(WriteError::Broken)?;
         }
@@ -94,7 +122,7 @@ fn keep(path: &std::path::Path, note: &[u8]) -> io::Result<()> {
 }
 
 /// The size in a checkpoint key, if it is one.
-fn size_of(key: &str) -> Option<u64> {
+pub(crate) fn size_of(key: &str) -> Option<u64> {
     let n: u64 = key
         .strip_prefix("checkpoints/")?
         .strip_suffix(".note")?
@@ -103,8 +131,18 @@ fn size_of(key: &str) -> Option<u64> {
     (checkpoint::key(n) == key).then_some(n)
 }
 
+/// The size in an anchor key, if it is one.
+pub(crate) fn anchored_size(key: &str) -> Option<u64> {
+    let n: u64 = key
+        .strip_prefix("anchors/")?
+        .strip_suffix(".tsr")?
+        .parse()
+        .ok()?;
+    (checkpoint::anchor_key(n) == key).then_some(n)
+}
+
 /// The stream's latest checkpoint in `store`: its size and bytes.
-pub(crate) async fn latest<S: Store>(store: &S) -> io::Result<Option<(u64, Vec<u8>)>> {
+pub async fn latest_checkpoint<S: Store>(store: &S) -> io::Result<Option<(u64, Vec<u8>)>> {
     let Some(size) = store
         .list("checkpoints/")
         .await?

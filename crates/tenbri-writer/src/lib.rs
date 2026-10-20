@@ -7,11 +7,12 @@
 //! writer between many tasks with group commit and backpressure. A [`Hook`] runs after every HEAD
 //! the writer moves; [`Checkpoints`] is the one that writes signed checkpoints, and
 //! [`Writer::with_checkpoints`] refuses a HEAD older than the latest one. [`verify`] and
-//! [`Reader`] read a stream back; [`gc`] removes what crashed writers left.
+//! [`Reader`] read a stream back; [`receipt`] proves entries of it; [`gc`] removes what crashed writers left.
 
 mod checkpoints;
 mod lane;
 mod read;
+mod receipt;
 
 use std::fmt;
 use std::future::Future;
@@ -26,9 +27,10 @@ use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
 use tenbri_merkle::Hash;
 use tenbri_store::{Object, Put, Store, Swap, Version, is_temporary};
 
-pub use checkpoints::{CHECKPOINT_FILE, Checkpoints};
+pub use checkpoints::{CHECKPOINT_FILE, Checkpoints, latest_checkpoint};
 pub use lane::{Lane, LaneConfig};
 pub use read::{ReadError, Reader, Report, batch_key, batch_seq, split_batch, verify};
+pub use receipt::{ReceiptError, receipt};
 
 /// How long an intent may stay open before the next writer session reconciles it: 1 hour.
 pub const RECONCILE_AFTER_MS: i64 = 3_600_000;

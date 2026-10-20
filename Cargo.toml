@@ -16,6 +16,7 @@ homepage = "https://github.com/tenbri/tenbri"
 # The workspace's own crates, for path dependencies. Release Please moves these versions with
 # [workspace.package] (release-please-config.json); crates.io needs them to publish.
 [workspace.dependencies]
+tenbri-anchor = { path = "crates/tenbri-anchor", version = "0.1.0-alpha.2" }
 tenbri-core = { path = "crates/tenbri-core", version = "0.1.0-alpha.2" }
 tenbri-keys = { path = "crates/tenbri-keys", version = "0.1.0-alpha.2" }
 tenbri-merkle = { path = "crates/tenbri-merkle", version = "0.1.0-alpha.2" }

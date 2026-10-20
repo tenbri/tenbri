@@ -175,7 +175,7 @@ pub async fn verify<S: Store>(store: &S, pin: Option<&str>) -> io::Result<Report
     let broken = match r.poll().await {
         Ok(_) => match (
             r.chain.invalidated(),
-            crate::checkpoints::latest(store).await?,
+            crate::checkpoints::latest_checkpoint(store).await?,
         ) {
             (Some(b), _) => Some(b.clone()),
             (None, None) => None,
