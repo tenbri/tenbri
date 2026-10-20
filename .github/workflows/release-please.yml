@@ -87,9 +87,10 @@ jobs:
           path: dist
           pattern: wheels-*
           merge-multiple: true
-      # With no PYPI_API_TOKEN, the action uses the trusted publisher. A version PyPI already has
+      # The trusted publisher when PYPI_TRUSTED_PUBLISHING is true, even with a PYPI_API_TOKEN secret
+      # kept (the token is only for a package's first upload). A version PyPI already has
       # is skipped, so a failed run can be repeated.
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          password: ${{ vars.PYPI_TRUSTED_PUBLISHING != 'true' && secrets.PYPI_API_TOKEN || '' }}
           skip-existing: true
