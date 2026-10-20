@@ -24,7 +24,7 @@ It works on its own, with any agent framework, from Rust, Python, Node, the brow
 ## Quickstart
 
 ```bash
-cargo install tenbri-cli --version ^0.1.0-beta.1
+cargo install tenbri-cli --version ^0.1.0-beta.5
 tenbri init ./audit/support
 echo '{"kind":"decision","phase":"intent","source":"sdk","principal":{"kind":"agent","id":"support-bot"},"action":{"type":"reply_ticket","target":"zendesk:ticket/1042"}}' | tenbri append ./audit/support
 tenbri query ./audit/support
@@ -34,25 +34,80 @@ tenbri verify ./audit/support
 
 `init` pins the stream's key on this machine, so `verify` checks against it (the Python and Node
 `init()` record it too); anyone else passes `--key` with the fingerprint `init` printed. Set `TENBRI_STREAM=./audit/support` to leave the path
-out, and see `tenbri append --help` for the entry format.
+out, and see `tenbri append --help` for the entry format. Walk through it in the
+[quickstart](https://tenbri.com/docs/getting-started/quickstart/).
+
+## Install
+
+Tenbri ships one version everywhere. While it is in pre-release, name the pre-release channel:
+`--version` for cargo, `--pre` for pip, `@next` for npm.
+
+| You want to | Install | Docs |
+|---|---|---|
+| Record and verify from a shell, a script or CI | `cargo install tenbri-cli --version ^0.1.0-beta.5`, or a [release binary](https://github.com/tenbri/tenbri/releases) | [The CLI](https://tenbri.com/docs/getting-started/install/#the-cli) |
+| Let agents in any language write over HTTP or gRPC, and browse in Tenbri UI | `cargo install tenbri-server --version ^0.1.0-beta.5` (`tenbrid`) | [The tenbrid server](https://tenbri.com/docs/getting-started/install/#the-tenbrid-server) |
+| Record from Python | `pip install --pre tenbri` | [Python](https://tenbri.com/docs/getting-started/install/#python) |
+| Record from Node or TypeScript | `npm install tenbri@next` | [Node and TypeScript](https://tenbri.com/docs/getting-started/install/#node-and-typescript) |
+| Record from Rust | `cargo add tenbri-writer@0.1.0-beta.5` and friends | [Rust crates](https://tenbri.com/docs/getting-started/install/#rust-crates) |
+| Verify a stream in the browser | `npm install @tenbri/wasm@next` | [WASM verifier](https://tenbri.com/docs/getting-started/install/#wasm-verifier) |
+
+Streams written from any of them verify with any other. Full guide: [Install](https://tenbri.com/docs/getting-started/install/).
+
+## Adapters
+
+An adapter records an agent framework's tool calls, approvals and handoffs as signed decisions,
+with no change to your tools: an intent that is durable before each tool runs, then its outcome.
+Install it, open the stream, instrument the framework:
+
+```bash
+pip install --pre tenbri-claude-agent-sdk
+export TENBRI_STREAM=./audit TENBRI_AGENT=agent:support TENBRI_APPROVER=person:alice
+```
+
+```python
+import tenbri
+
+tenbri.init()                         # the stream, from TENBRI_STREAM
+tenbri.instrument_claude_agent_sdk()  # every session from here on is recorded
+
+# ... your agent, unchanged
+```
+
+| Framework | Python | npm | Docs |
+|---|---|---|---|
+| Claude Agent SDK | `tenbri-claude-agent-sdk`: `tenbri.instrument_claude_agent_sdk()` | `@tenbri/claude-agent-sdk`: `instrumentClaudeAgentSdk(options)` | [Claude Agent SDK](https://tenbri.com/docs/adapters/claude-agent-sdk/) |
+| OpenAI Agents SDK | `tenbri-openai-agents`: `tenbri.instrument_openai_agents()` | `@tenbri/openai-agents`: `instrumentOpenAIAgents()` | [OpenAI Agents SDK](https://tenbri.com/docs/adapters/openai-agents/) |
+| LangGraph and LangChain | `tenbri-langgraph`: `tenbri.instrument_langchain()` | `@tenbri/langgraph`: `instrumentLangChain()` | [LangGraph and LangChain](https://tenbri.com/docs/adapters/langgraph/) |
+
+Any other framework: wrap your tool functions in `@tenbri.decision` (Python) or `decision()`
+(Node), or write through the CLI or REST ([Any other framework](https://tenbri.com/docs/adapters/planned/)).
+Map tool calls to actions, targets and policies in `tenbri.toml`, and see what each event records,
+in [Adapters](https://tenbri.com/docs/adapters/).
 
 ## Tenbri UI
 
-`tenbrid` serves a read-only web UI at its root. Open http://127.0.0.1:7070 and sign in with a
-stream name and a bearer token (`tenbrid token` makes one).
+`tenbrid` serves Tenbri UI at its root: a read-only view of what your agents decided, how it went
+and whether the record still verifies, without anyone running a command.
 
 <p align="center">
   <img src="docs/assets/ui-tour.gif" alt="A tour of Tenbri UI: the overview of a stream, decisions filtered to errors, one decision's timeline and signed chain, its OpenTelemetry trace, and the integrity check">
 </p>
 
-- **Overview**: decisions, error and refusal rates, intent-to-outcome latency, top actions and principals.
-- **Decisions**: every intent joined with its outcome, with search, filters by status, action and principal, and column picker.
-- **Decision and trace views**: a timeline of approval, intent and outcome (or every decision in one OpenTelemetry trace), with each entry's fields, chain links and a receipt download.
-- **Principals** and **Subjects**: who acted, and what was decided about whom.
-- **Integrity**: whether the stream verifies against its pinned key, the head, the latest checkpoint and the key history.
+Open `tenbrid`'s address (http://127.0.0.1:7070 by default) and sign in with a stream's name (or
+its `tnb1:` id) and the bearer token you were given. Add more streams from the stream menu at the
+top of the sidebar. Every page reads the time range picked at the top, from the past hour to all
+time; **Live** follows new entries as they are written.
 
-The token stays in the browser tab; the UI reads the same REST API as any client and cannot
-write. Its source is in [`ui/`](ui/README.md).
+- **Overview**: decisions by outcome status over time, error and refusal rates, intent to outcome latency (p50, p95), top actions and principals.
+- **Decisions**: one row per decision, the intent joined with its outcome and approval. Search, filter by status, action and principal, sort and pick columns. Filters live in the URL, so a link shares the view.
+- **Decision**: the approval, intent and outcome on a timeline, with each entry's fields, chain links and raw JSON. **Receipt** downloads a receipt anyone can verify offline.
+- **Traces**: decisions grouped by their OpenTelemetry trace, each opening as one timeline.
+- **Principals** and **Subjects**: per agent or person, and per subject the decisions are about.
+- **Integrity**: whether the whole stream verifies against its pinned key, the head, the latest checkpoint and the key events.
+
+The UI cannot write, and the token stays in that browser tab. It loads at most 20,000 entries for
+the selected range, so pick a shorter range for busy streams. For evidence you hand over, use a
+receipt or `tenbri verify` with your own pin. More in [Tenbri UI](https://tenbri.com/docs/getting-started/ui/).
 
 ## The problem
 
@@ -117,7 +172,7 @@ trace that produced them (OpenTelemetry trace and span ids).
 
 ## Status
 
-**Pre-release: `0.1.0-beta.1` is out; nothing here is ready for production yet.** The code lands
+**Pre-release: `0.1.0-beta.5` is out; nothing here is ready for production yet.** The code lands
 on the way to v0.1.0 through `0.1.0-alpha`, `-beta` and `-rc` pre-releases
 ([CONTRIBUTING.md](CONTRIBUTING.md#releases)). Records written by pre-releases are not covered by the
 format promise: the format is provisional until its external review ends ([spec/](spec/README.md)).
