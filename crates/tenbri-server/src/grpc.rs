@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures_util::{Stream, StreamExt};
-use tenbri_core::canon;
+use tenbri_core::{Trace, canon};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::metadata::{MetadataMap, MetadataValue};
@@ -68,11 +68,18 @@ impl Grpc {
         let key = (!key.is_empty()).then_some(key);
         let a = self
             .0
-            .append(&t, stream, op, key, draft.as_bytes())
+            .append(&t, stream, op, key, draft.as_bytes(), trace(m).as_ref())
             .await
             .map_err(status)?;
         Ok(Some(appended(a)))
     }
+}
+
+/// The ids of a valid W3C `traceparent` in the request's metadata.
+fn trace(m: &MetadataMap) -> Option<Trace> {
+    m.get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .and_then(tenbri_otlp::traceparent::parse)
 }
 
 /// An [`ApiError`] as a gRPC status: the code in `tenbri-error-code`, the REST body in
@@ -174,7 +181,7 @@ impl TenbriService for Grpc {
             .collect::<Result<Vec<_>, _>>()?;
         let out = self
             .0
-            .append_batch(&t, &q.stream, drafts)
+            .append_batch(&t, &q.stream, drafts, trace(r.metadata()).as_ref())
             .await
             .map_err(status)?;
         Ok(Response::new(pb::AppendBatchResponse {

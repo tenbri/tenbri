@@ -16,7 +16,7 @@ use axum::routing::{MethodFilter, on};
 use futures_util::{Stream, StreamExt};
 use serde::Serialize;
 use serde_json::value::RawValue;
-use tenbri_core::canon;
+use tenbri_core::{Trace, canon};
 use tokio::net::TcpListener;
 use utoipa::openapi::path::HttpMethod;
 use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
@@ -262,6 +262,14 @@ fn queried((s, v): (Arc<Stored>, Verification)) -> QueriedBody {
     }
 }
 
+/// The ids of a valid W3C `traceparent` header; an invalid one is ignored, as Trace Context says.
+fn trace(headers: &HeaderMap) -> Option<Trace> {
+    headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .and_then(tenbri_otlp::traceparent::parse)
+}
+
 async fn append(
     d: Arc<Daemon>,
     token: Token,
@@ -277,7 +285,9 @@ async fn append(
                 .map_err(|_| ApiError::new(ErrorCode::InvalidRequest, "Idempotency-Key: not text"))
         })
         .transpose()?;
-    let a = d.append(&token, &stream, op, key, &body).await?;
+    let a = d
+        .append(&token, &stream, op, key, &body, trace(&headers).as_ref())
+        .await?;
     let status = if a.replayed {
         StatusCode::OK
     } else {
@@ -293,6 +303,7 @@ async fn append(
     params(
         ("stream" = String, Path, description = "The stream's name in tenbrid's configuration, or its id (tnb1:...)"),
         ("Idempotency-Key" = String, Header, description = "The entry id: a ULID the client generates"),
+        ("traceparent" = Option<String>, Header, description = "W3C Trace Context: the entry's `trace` (trace and span id) unless the draft has one"),
     ),
     request_body(content = Object, description = "A draft intent (spec/format-v1.md): action, inputs, rule, subject, approval, trace, links, ext... `kind` and `phase` may be left out; `principal` defaults to the token's; `source` to sdk; `durability` to local."),
     responses(
@@ -319,6 +330,7 @@ async fn append_intent(
     params(
         ("stream" = String, Path, description = "The stream's name or id"),
         ("Idempotency-Key" = String, Header, description = "The entry id: a ULID the client generates"),
+        ("traceparent" = Option<String>, Header, description = "W3C Trace Context: the entry's `trace` (trace and span id) unless the draft has one"),
     ),
     request_body(content = Object, description = "A draft outcome: `intent` (the intent's id) and `status` (ok, error, refused, unknown). `principal`, `action`, `subject` and `source` default to the intent's."),
     responses(
@@ -345,6 +357,7 @@ async fn append_outcome(
     params(
         ("stream" = String, Path, description = "The stream's name or id"),
         ("Idempotency-Key" = String, Header, description = "The entry id: a ULID the client generates"),
+        ("traceparent" = Option<String>, Header, description = "W3C Trace Context: the entry's `trace` (trace and span id) unless the draft has one"),
     ),
     request_body(content = Object, description = "A draft approval: `action` approved, by the token's principal."),
     responses(
@@ -369,7 +382,10 @@ async fn append_approval(
 #[utoipa::path(
     post,
     path = "/v1/streams/{stream}/entries",
-    params(("stream" = String, Path, description = "The stream's name or id")),
+    params(
+        ("stream" = String, Path, description = "The stream's name or id"),
+        ("traceparent" = Option<String>, Header, description = "W3C Trace Context: the `trace` of every draft without one"),
+    ),
     request_body(content = BatchRequest),
     responses(
         (status = 200, description = "Every entry is durable (or was replayed)", body = BatchBody),
@@ -381,6 +397,7 @@ async fn append_batch(
     State(d): State<Arc<Daemon>>,
     Caller(t): Caller,
     Path(stream): Path<String>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<BatchBody>, ApiError> {
     let bad = || {
@@ -396,7 +413,9 @@ async fn append_batch(
         Some((k, canon::Value::Arr(a))) if k == "entries" && members.is_empty() => a,
         _ => return Err(bad()),
     };
-    let out = d.append_batch(&t, &stream, drafts).await?;
+    let out = d
+        .append_batch(&t, &stream, drafts, trace(&headers).as_ref())
+        .await?;
     Ok(Json(BatchBody {
         entries: out.into_iter().map(appended).collect(),
     }))

@@ -842,3 +842,79 @@ async fn grpc_round_trip() {
     assert!(!matches!(end, Ok(Some(_))));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A `traceparent` on an append becomes the entry's `trace` and comes back out through the query;
+/// a retry under a new span replays; a draft's own `trace` wins; an invalid header is ignored.
+#[tokio::test(flavor = "multi_thread")]
+async fn traceparent_round_trip() {
+    let dir = tmp("trace");
+    init(&dir, "support").await;
+    init(&dir, "other").await;
+    let s = start(&dir, "").await;
+    let (trace, span) = ("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7");
+    let post_traced = |key: String, body: String, tp: &'static str| {
+        let url = format!("{}/v1/streams/support/intents", s.rest);
+        async move {
+            let res = reqwest::Client::new()
+                .post(url)
+                .bearer_auth(AGENT)
+                .header("idempotency-key", key)
+                .header("traceparent", tp)
+                .body(body)
+                .send()
+                .await
+                .unwrap();
+            (res.status(), res.json::<Value>().await.unwrap())
+        }
+    };
+
+    let k = id();
+    let tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    let (st, v) = post_traced(k.clone(), intent("zendesk:ticket/7"), tp).await;
+    assert_eq!(st, StatusCode::CREATED, "{v}");
+    assert_eq!(
+        v["entry"]["trace"],
+        json!({"trace_id": trace, "span_id": span})
+    );
+    let found = q(&s, "target=zendesk:ticket/7").await;
+    assert_eq!(found["entries"][0]["entry"]["trace"]["trace_id"], trace);
+    assert_eq!(found["entries"][0]["verification"], "verified");
+
+    // A retry comes with a new span: still the same entry.
+    let retry = "00-4bf92f3577b34da6a3ce929d0e0e4736-1111111111111111-01";
+    let (st, again) = post_traced(k, intent("zendesk:ticket/7"), retry).await;
+    assert_eq!((st, &again["entry"]), (StatusCode::OK, &v["entry"]));
+
+    let own = json!({
+        "action": {"type": "reply_ticket", "target": "zendesk:ticket/8"},
+        "trace": {"trace_id": "0af7651916cd43dd8448eb211c80319c", "span_id": "b7ad6b7169203331"},
+    });
+    let (_, v) = post_traced(id(), own.to_string(), tp).await;
+    assert_eq!(v["entry"]["trace"], own["trace"]);
+    let (st, v) = post_traced(id(), intent("zendesk:ticket/9"), "00-bad-01").await;
+    assert_eq!(st, StatusCode::CREATED, "{v}");
+    assert_eq!(v["entry"].get("trace"), None);
+
+    let mut c = s.grpc().await;
+    let mut r = authed(
+        AGENT,
+        pb::AppendIntentRequest {
+            stream: "support".into(),
+            idempotency_key: id(),
+            draft_json: intent("zendesk:ticket/10"),
+        },
+    );
+    r.metadata_mut().insert("traceparent", tp.parse().unwrap());
+    let a = c
+        .append_intent(r)
+        .await
+        .unwrap()
+        .into_inner()
+        .appended
+        .unwrap();
+    let e: Value = serde_json::from_str(&a.entry_json).unwrap();
+    assert_eq!(e["trace"]["span_id"], span);
+
+    s.stop().await;
+    std::fs::remove_dir_all(&dir).unwrap();
+}

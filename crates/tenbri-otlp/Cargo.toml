@@ -1,12 +1,22 @@
 [package]
 name = "tenbri-otlp"
-description = "OpenTelemetry GenAI span ingest for Tenbri."
+description = "OpenTelemetry correlation for Tenbri: W3C traceparent, the active span's ids, spans and metrics for appends and verifies."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+
+[features]
+# The active span's ids, and Tenbri's own spans and metrics, through the OpenTelemetry API. The
+# API sends nothing: telemetry leaves the process only through an SDK and exporter the
+# application installs.
+otel = ["dep:opentelemetry"]
+
+[dependencies]
+opentelemetry = { version = "0.33", default-features = false, features = ["trace", "metrics"], optional = true }
+tenbri-core.workspace = true
 
 [lints]
 workspace = true

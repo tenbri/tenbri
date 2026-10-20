@@ -23,6 +23,7 @@ serde_json = { version = "1", features = ["raw_value"] }
 serde_urlencoded = "0.7"
 sha2 = "0.11"
 tenbri-core.workspace = true
+tenbri-otlp.workspace = true
 tenbri-keys.workspace = true
 tenbri-schema.workspace = true
 tenbri-store = { workspace = true, features = ["s3"] }
