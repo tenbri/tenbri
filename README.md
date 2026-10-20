@@ -42,7 +42,7 @@ out, and see `tenbri append --help` for the entry format.
 stream name and a bearer token (`tenbrid token` makes one).
 
 <p align="center">
-  <img src="docs/assets/ui-overview.webp" alt="Tenbri UI: the overview of a stream, with decision volume by outcome status, latency, top actions and top principals">
+  <img src="docs/assets/ui-tour.gif" alt="A tour of Tenbri UI: the overview of a stream, decisions filtered to errors, one decision's timeline and signed chain, its OpenTelemetry trace, and the integrity check">
 </p>
 
 - **Overview**: decisions, error and refusal rates, intent-to-outcome latency, top actions and principals.
