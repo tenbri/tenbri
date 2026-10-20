@@ -80,7 +80,7 @@ trace that produced them (OpenTelemetry trace and span ids).
 
 ## Status
 
-**Pre-release: `0.1.0-alpha.1` is out; nothing here is ready for production yet.** The code lands
+**Pre-release: `0.1.0-beta.1` is out; nothing here is ready for production yet.** The code lands
 on the way to v0.1.0 through `0.1.0-alpha`, `-beta` and `-rc` pre-releases
 ([CONTRIBUTING.md](CONTRIBUTING.md#releases)). Records written by pre-releases are not covered by the
 format promise: the format is provisional until its external review ends ([spec/](spec/README.md)).
@@ -101,7 +101,7 @@ v0.1.0 ships every feature below, each labelled:
 | Anchoring | ⬜ Checkpoint publishing to auditors · ✅ RFC 3161 timestamps | ⬜ Sigstore Rekor · ⬜ witnesses |
 | Privacy | ✅ Blob encryption · ✅ per-subject keyed digests and erasure · ✅ local key store | |
 | Query | ✅ SQLite or Parquet index | ⬜ `--as-of` time travel · ⬜ Iceberg index |
-| CLI | ✅ init · ✅ append · ✅ verify · ✅ query · ✅ tail · ✅ checkpoint · ✅ receipt · ✅ keys · ✅ erase · ⬜ gc | ⬜ export · ⬜ mcp · ⬜ proxy · ⬜ ingest |
+| CLI | ✅ init · ✅ append · ✅ verify · ✅ query · ✅ tail · ✅ checkpoint · ✅ receipt · ✅ keys · ✅ erase · ✅ index · ✅ schema check · ⬜ gc | ⬜ export · ⬜ mcp · ⬜ proxy · ⬜ ingest |
 | Bindings | ✅ Rust · ✅ Python · ✅ Node · ✅ WASM verifier | |
 | Adapters | ✅ Claude Agent SDK · ✅ OpenAI Agents SDK · ✅ LangGraph and LangChain | ⬜ Pydantic AI · ⬜ Vercel AI SDK · ⬜ Mastra · ⬜ Google ADK · ⬜ AWS Strands · ⬜ Microsoft Agent Framework · ⬜ CrewAI · ⬜ LlamaIndex · ⬜ A2A |
 | Fleet and liveness | ⬜ `action.net` target fields (host, IP, port) · ⬜ indexed host, IP and domain · ⬜ `query --target-domain` and `--target-ip` | ⬜ run registration and silent-stream alerts in tenbrid · ⬜ proxy-observed entries · ⬜ `query --unmatched` |
