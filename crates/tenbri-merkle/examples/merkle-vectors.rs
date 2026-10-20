@@ -1,5 +1,5 @@
 //! Writes spec/vectors/merkle.json and checkpoints.json from fixed seeds and the `valid` stream of
-//! chains.json: `cargo run -p tenbri-merkle --example vectors -- spec/vectors`.
+//! chains.json: `cargo run -p tenbri-merkle --example merkle-vectors -- spec/vectors`.
 //!
 //! Released vectors are frozen; this exists so the drafts can be regenerated until then, and so
 //! anyone can see how each case was made.
