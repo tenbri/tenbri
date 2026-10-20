@@ -91,6 +91,12 @@ patch, a `feat:` a minor, and before 1.0 a `feat!:` is a minor too (never a jump
 requests are squash-merged, so the title is the subject people read in the release notes: write it
 for them.
 
+A maintainer reviews every pull request from outside the organization, Dependabot's included
+(Dependabot's patch and minor updates then merge themselves). A maintainer's own pull request merges
+itself once the required checks pass ([merge.yml](.github/workflows/merge.yml)), except drafts,
+`chore:` pull requests, the release pull request and changes to how releases are made, which a
+maintainer merges by hand.
+
 ## Releases
 
 Nobody bumps a version or writes a changelog by hand. Each push to `main` updates one pull request,
@@ -98,8 +104,16 @@ Nobody bumps a version or writes a changelog by hand. Each push to `main` update
 the next version, `CHANGELOG.md`, the `[workspace.package]` version every crate inherits (and
 `Cargo.lock`) and `bindings/wasm/package.json`. The Python package reads its version from Cargo and
 the npm packages get theirs at publish time. Merging the pull request tags `vX.Y.Z` and creates the
-GitHub release; [release.yml](.github/workflows/release.yml) then publishes the crates, the CLI
-binaries, the wheels, the npm packages and the container from that tag.
+GitHub release; [release.yml](.github/workflows/release.yml), called from
+[release-please.yml](.github/workflows/release-please.yml), then publishes the crates, the CLI
+binaries, the wheels, the npm packages and the container from that tag. To publish a tag again,
+run release-please.yml by hand with it (`gh workflow run release-please.yml -f tag=vX.Y.Z`): the
+registries' trusted publishers name that file, so release.yml never runs on its own.
+
+Release Please and merge.yml use the `RELEASE_PLEASE_TOKEN` secret, a maintainer's fine-grained
+token for this repository with Contents, Pull requests and Workflows set to read and write, so the
+release pull request gets CI and a merge starts the workflows on `main`. It expires: renew it
+before it does, or releases and maintainers' merges stop.
 
 All crates and packages share one version and one tag. Registries spell pre-releases differently:
 `0.1.0-alpha.1` on crates.io and npm is `0.1.0a1` on PyPI.
