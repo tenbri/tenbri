@@ -25,7 +25,7 @@ sha2 = "0.11"
 tenbri-core.workspace = true
 tenbri-keys.workspace = true
 tenbri-schema.workspace = true
-tenbri-store.workspace = true
+tenbri-store = { workspace = true, features = ["s3"] }
 tenbri-writer.workspace = true
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["net", "sync"] }
