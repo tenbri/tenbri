@@ -127,7 +127,7 @@ function Connect({ token: known, onConnect, onCancel }: { token?: string; onConn
         <CardHeader>
           <Mascot className="mx-auto mb-1 size-28" />
           <CardTitle className="text-center text-xl">Tenbri UI</CardTitle>
-          <CardDescription className="text-center">The record of what your agents decided. Read-only: nothing here can write.</CardDescription>
+          <CardDescription className="text-center">The Agent Decision Record of what your agents decided. Read-only: nothing here can write.</CardDescription>
         </CardHeader>
         <form onSubmit={submit}>
           <CardContent className="flex flex-col gap-4">
