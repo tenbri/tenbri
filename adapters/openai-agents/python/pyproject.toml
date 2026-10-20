@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tenbri-openai-agents"
+# ponytail: a placeholder until releases carry the adapters; Release Please moves only the
+# workspace version today (release-please-config.json), and nothing publishes this package yet.
+version = "0.0.0"
+description = "Tenbri for the OpenAI Agents SDK: every tool call, handoff and approval signed, chained and provable."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+# The SDK's current and previous minor releases are tested (ci.yml, adapter-openai-agents).
+dependencies = ["tenbri", "openai-agents>=0.23,<0.25"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: AsyncIO",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Repository = "https://github.com/tenbri/tenbri"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tenbri_openai_agents"]

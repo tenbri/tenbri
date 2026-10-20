@@ -281,3 +281,56 @@ jobs:
             exit 0
           fi
           buf breaking contract/proto --against ".git#branch=origin/$BASE,subdir=contract/proto"
+
+  # The OpenAI Agents SDK adapter (adapters/openai-agents), in Python and TypeScript, against the
+  # SDK's current and previous minor release (the PRD's adapter conformance): the conformance
+  # scenario and the rest with a scripted model, so no API key; types; the example end to end.
+  adapter-openai-agents:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { lang: python, sdk: "openai-agents==0.24.*" }
+          - { lang: python, sdk: "openai-agents==0.23.*" }
+          - { lang: typescript, sdk: "@openai/agents-core@0.20" }
+          - { lang: typescript, sdk: "@openai/agents-core@0.19" }
+    name: adapter-openai-agents (${{ matrix.lang }}, ${{ matrix.sdk }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SDK: ${{ matrix.sdk }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: adapter-${{ matrix.lang }}
+      - if: matrix.lang == 'python'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - if: matrix.lang == 'python'
+        run: |
+          python -m pip install ./bindings/python ./adapters/openai-agents/python "$SDK" pytest mypy
+          python -m pytest adapters/openai-agents/python/tests
+          python -m mypy --strict adapters/openai-agents/python/tenbri_openai_agents
+          python adapters/openai-agents/python/examples/refunds.py "$RUNNER_TEMP/audit"
+      - if: matrix.lang == 'typescript'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            bindings/node/package-lock.json
+            adapters/openai-agents/typescript/package-lock.json
+      - if: matrix.lang == 'typescript'
+        working-directory: bindings/node
+        run: npm ci && npx napi build --platform
+      - if: matrix.lang == 'typescript'
+        working-directory: adapters/openai-agents/typescript
+        run: |
+          npm ci
+          npm install --no-save "$SDK"
+          npm test
+          npm run build
+          node examples/refunds.ts "$RUNNER_TEMP/audit"
