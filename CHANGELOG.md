@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-beta.5](https://github.com/tenbri/tenbri/compare/v0.1.0-beta.4...v0.1.0-beta.5) (2026-10-20)
+
+
+### Features
+
+* **server:** Tenbri UI, a read-only web UI served by tenbrid at / ([#56](https://github.com/tenbri/tenbri/issues/56)) ([85910aa](https://github.com/tenbri/tenbri/commit/85910aaa25e291533fc02b47e976244d97bb68c7))
+
+
+### Documentation
+
+* name the merkle-vectors example correctly ([#54](https://github.com/tenbri/tenbri/issues/54)) ([b7df858](https://github.com/tenbri/tenbri/commit/b7df858f569a99482b10e133c329b5e9f314ec7c))
+* **readme:** install, adapters and Tenbri UI for users, beta.5 ([#58](https://github.com/tenbri/tenbri/issues/58)) ([38c584c](https://github.com/tenbri/tenbri/commit/38c584c426eed0954f0a9f6397fd0c30900c512d))
+
 ## [0.1.0-beta.4](https://github.com/tenbri/tenbri/compare/v0.1.0-beta.3...v0.1.0-beta.4) (2026-10-20)
 
 
