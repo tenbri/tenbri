@@ -2687,6 +2687,7 @@ dependencies = [
  "serde_json",
  "tenbri-core",
  "tenbri-keys",
+ "tenbri-merkle",
  "tenbri-store",
  "tokio",
 ]

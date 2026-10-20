@@ -14,11 +14,11 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use tenbri_core::{Entry, Head, Role, canon, sign};
 use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
-use tenbri_merkle::{Hash, Note};
+use tenbri_merkle::Note;
 use tenbri_schema::{Schemas, Unknown};
 use tenbri_store::{AnyStore, Store};
 use tenbri_writer::{
-    RECONCILE_AFTER_MS, ReadError, Reader, Writer, draft_from_json, now_ms, verify,
+    CHECKPOINT_FILE, RECONCILE_AFTER_MS, ReadError, Reader, Writer, draft_from_json, now_ms, verify,
 };
 
 #[derive(Parser)]
@@ -179,18 +179,12 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
             }
             if let Some(note) = &note {
                 // ponytail: reads the stream a second time for its entry hashes; one pass once
-                // tenbri-writer's verify returns them.
+                // tenbri-writer's verify takes a checkpoint.
                 let mut reader = Reader::new(&store, pin.as_deref());
-                let hashes: Vec<Hash> = read(&mut reader)
-                    .await?
-                    .iter()
-                    .map(|e| {
-                        let h = sign::entry_hash(line(e).as_bytes());
-                        tenbri_core::encoding::prefixed::<32>(&h, "sha256:").expect("a hash")
-                    })
-                    .collect();
+                read(&mut reader).await?;
+                let hashes = reader.hashes();
                 let cp = &note.checkpoint;
-                match note.check(reader.chain(), &hashes) {
+                match note.check(reader.chain(), hashes) {
                     Ok(_) => println!("matches checkpoint {} at size {}", cp.origin, cp.size),
                     Err(b) => {
                         println!("broken at seq {}: {}", b.seq, b.error);
@@ -203,6 +197,9 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
                         return Ok(1);
                     }
                 }
+            }
+            if let Some(size) = r.checkpoint {
+                println!("matches its latest checkpoint, at size {size}");
             }
             if let Some(pin) = pin {
                 println!(
@@ -442,39 +439,15 @@ async fn append(path: &str, keys: &Path) -> Result<u8, Fail> {
                 ),
             )
         })?;
-    let mut w = Writer::open(store, Some(&sign::fingerprint(&genesis))).await?;
-
-    // Sign with a stored session the stream certified, valid for at least another minute; else
-    // certify a new one with the current stream key.
+    // The latest checkpoint is kept with the keys, apart from the stream: the HEAD floor.
+    let mut w = Writer::open(store, Some(&sign::fingerprint(&genesis)))
+        .await?
+        .with_checkpoints(Some(ks.dir().join(CHECKPOINT_FILE)))
+        .await?;
+    // A stored session the stream certified, valid for at least another minute; else a new one
+    // certified with the current stream key.
+    w.use_keys(ks).await?;
     let now = now_ms();
-    let mut sessions: Vec<_> = metas.iter().filter(|m| m.role == Role::Session).collect();
-    sessions.sort_by(|a, b| b.not_after.cmp(&a.not_after));
-    let usable = sessions.iter().find_map(|m| {
-        let k = ks.load(&m.id).ok()?;
-        (k.valid_at(now + 60_000) && w.use_session(k).is_ok()).then_some(())
-    });
-    if usable.is_none() {
-        let current = w
-            .chain()
-            .stream_key()
-            .ok_or_else(|| Fail(2, "the stream has no stream key".into()))?
-            .to_owned();
-        let stream_key = ks.load(&current).map_err(|e| {
-            Fail(
-                2,
-                format!("no usable session key, and the stream key {current} is not here: {e}"),
-            )
-        })?;
-        let session = Key::new_session(now, SESSION_LIFETIME_MS)?;
-        ks.save(
-            &session,
-            ks.list()?
-                .iter()
-                .find(|m| m.id == current)
-                .map_or(Backend::File, |m| m.backend),
-        )?;
-        w.certify_session(&stream_key, session).await?;
-    }
     w.reconcile_stale(now, RECONCILE_AFTER_MS, draft.intent.as_deref())
         .await?;
     let e = w.append(draft).await?;

@@ -5,11 +5,11 @@
 //! grpc_listen = "127.0.0.1:7071"   # gRPC; TENBRI_GRPC_LISTEN
 //! keys = "/var/lib/tenbri/keys"    # TENBRI_KEYS; default ~/.config/tenbri/keys
 //! schema = "tenbri.toml"           # action schemas; TENBRI_SCHEMA; none: nothing is checked
-//! queue = 10000                    # entries waiting per stream; TENBRI_QUEUE
+//! queue = 10000                    # appends waiting per stream (a batch counts once); TENBRI_QUEUE
 //! deadline_ms = 2000               # how long an append waits for the queue; TENBRI_DEADLINE_MS
 //!
 //! [streams.support]                # the stream's name in URLs (its tnb1: id works too)
-//! path = "/var/lib/tenbri/audit/support"
+//! path = "/var/lib/tenbri/audit/support"  # or s3://bucket/prefix, r2://bucket/prefix
 //! key = "sha256:..."               # pin; default: the stream key held in `keys`
 //!
 //! [[tokens]]                       # `tenbrid token` makes one
@@ -18,7 +18,8 @@
 //! streams = ["support"]            # default: every stream
 //! ```
 //!
-//! Relative paths are relative to the file's directory.
+//! Relative paths are relative to the file's directory. Object stores take their credentials from
+//! `AWS_*` (and `CLOUDFLARE_ACCOUNT_ID` for R2), as `tenbri` does.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -49,7 +50,8 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StreamConfig {
-    pub path: PathBuf,
+    /// A local directory, or an object-store URL (`s3://`, `r2://`).
+    pub path: String,
     /// The genesis key's fingerprint (`sha256:…`) or public key (`ed25519:…`).
     pub key: Option<String>,
 }
@@ -104,7 +106,9 @@ impl Config {
             .map(PathBuf::from)
             .or(c.schema.map(|p| base.join(p)));
         for s in c.streams.values_mut() {
-            s.path = base.join(&s.path);
+            if !tenbri_store::is_url(&s.path) {
+                s.path = base.join(&s.path).to_string_lossy().into_owned();
+            }
         }
         if c.streams.is_empty() {
             return Err("no [streams.<name>] configured".into());
@@ -162,9 +166,12 @@ mod tests {
         assert_eq!(c.listen, listen());
         assert_eq!(c.keys.unwrap(), Path::new("/etc/tenbri/keys"));
         assert_eq!(
-            c.streams["support"].path,
+            Path::new(&c.streams["support"].path),
             Path::new("/etc/tenbri/audit/support")
         );
+        let s3 = FILE.replace("audit/support", "s3://bucket/audit");
+        let c = Config::parse(&s3, Path::new("/etc/tenbri"), |_| None).unwrap();
+        assert_eq!(c.streams["support"].path, "s3://bucket/audit");
         assert_eq!((c.queue, c.deadline_ms), (10_000, 2_000));
 
         let env = |k: &str| match k {

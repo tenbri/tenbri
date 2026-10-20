@@ -3,7 +3,8 @@
 use std::fmt;
 use std::io;
 
-use tenbri_core::{Broken, Chain, Code, Entry, Error, Head};
+use tenbri_core::{Broken, Chain, Code, Entry, Error, Head, encoding};
+use tenbri_merkle::Hash;
 use tenbri_store::{Store, Version};
 
 /// The key of the batch whose first entry is `seq`.
@@ -67,6 +68,7 @@ pub struct Reader<'a, S> {
     store: &'a S,
     pub(crate) chain: Chain,
     pub(crate) batches: Vec<u64>,
+    pub(crate) hashes: Vec<Hash>,
     pub(crate) head: Option<(Head, Version)>,
 }
 
@@ -77,6 +79,7 @@ impl<'a, S: Store> Reader<'a, S> {
             store,
             chain: Chain::new(pin),
             batches: vec![],
+            hashes: vec![],
             head: None,
         }
     }
@@ -87,6 +90,11 @@ impl<'a, S: Store> Reader<'a, S> {
 
     pub fn head(&self) -> Option<&Head> {
         self.head.as_ref().map(|(h, _)| h)
+    }
+
+    /// The entry hashes (RFC 6962 leaf hashes) of every entry read, from seq 1.
+    pub fn hashes(&self) -> &[Hash] {
+        &self.hashes
     }
 
     /// Reads up to the current HEAD; returns the entries that are new since the last poll.
@@ -115,6 +123,7 @@ impl<'a, S: Store> Reader<'a, S> {
             };
             for line in split_batch(&batch.bytes).map_err(|e| at(first, e))? {
                 out.push(self.chain.push(line).map_err(ReadError::Broken)?);
+                self.hashes.push(last_hash(&self.chain));
             }
             self.batches.push(first);
         }
@@ -134,6 +143,14 @@ impl<'a, S: Store> Reader<'a, S> {
     }
 }
 
+/// The hash of the last entry `chain` took.
+pub(crate) fn last_hash(chain: &Chain) -> Hash {
+    chain
+        .last_hash()
+        .and_then(|h| encoding::prefixed::<32>(h, "sha256:"))
+        .expect("a chain with entries has a last hash")
+}
+
 /// The result of [`verify`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Report {
@@ -143,13 +160,35 @@ pub struct Report {
     /// Whether the genesis key was checked against a pinned fingerprint.
     pub pinned: bool,
     pub broken: Option<Broken>,
+    /// The size of the stream's latest checkpoint, which it matched, if it has one.
+    pub checkpoint: Option<u64>,
 }
 
-/// Checks a whole stream: canonical bytes, chain, signatures, keys, intents, HEAD.
+/// Checks a whole stream: canonical bytes, chain, signatures, keys, intents, HEAD, and its latest
+/// checkpoint (not behind HEAD, signed by a session key of the stream, the same entries).
+///
+/// ponytail: the latest checkpoint only, each is a pass over the stream; all of them with
+/// incremental roots if a stream's older checkpoints ever need checking against itself.
 pub async fn verify<S: Store>(store: &S, pin: Option<&str>) -> io::Result<Report> {
     let mut r = Reader::new(store, pin);
+    let mut checkpoint = None;
     let broken = match r.poll().await {
-        Ok(_) => r.chain.invalidated().cloned(),
+        Ok(_) => match (
+            r.chain.invalidated(),
+            crate::checkpoints::latest(store).await?,
+        ) {
+            (Some(b), _) => Some(b.clone()),
+            (None, None) => None,
+            (None, Some((at, bytes))) => {
+                match crate::checkpoints::check(&bytes, Some(at), &r.chain, &r.hashes) {
+                    Ok(size) => {
+                        checkpoint = Some(size);
+                        None
+                    }
+                    Err(b) => Some(b),
+                }
+            }
+        },
         Err(ReadError::Broken(b)) => Some(b),
         Err(ReadError::NoStream) => {
             return Err(io::Error::new(
@@ -168,5 +207,6 @@ pub async fn verify<S: Store>(store: &S, pin: Option<&str>) -> io::Result<Report
         entries,
         pinned: pin.is_some(),
         broken,
+        checkpoint,
     })
 }
