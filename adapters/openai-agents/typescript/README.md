@@ -4,6 +4,10 @@
 in TypeScript: every tool call, handoff and approval of an agent becomes a signed, chained decision
 that anyone holding the stream's key fingerprint can verify offline.
 
+```sh
+npm install @tenbri/openai-agents@next tenbri@next @openai/agents
+```
+
 ```ts
 import { Agent, run } from '@openai/agents'
 import { Tenbri } from 'tenbri'

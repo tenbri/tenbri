@@ -441,12 +441,16 @@ fn query_through_the_index() {
     assert!(out(&o).contains("(parquet)"), "{o:?}");
     assert_eq!(strip(&rows(&q)), strip(&v));
 
-    // A tampered stream: the index still answers from what it read, --verify refuses.
+    // A tampered stream: a query whose answers come from the edited batch refuses, with or
+    // without --verify; one that does not touch it still answers from the index.
     let batch = s.join("batches").join("000000000004.jsonl");
     let text = std::fs::read_to_string(&batch).unwrap();
     std::fs::write(&batch, text.replace("t:1", "t:2")).unwrap();
-    assert_eq!(rows(&q).len(), 3);
-    let o = run(&[&q[..], &["--verify"]].concat(), "");
-    assert_eq!(o.status.code(), Some(1), "{o:?}");
+    for args in [&q[..], &[&q[..], &["--verify"]].concat()] {
+        let o = run(args, "");
+        assert_eq!(o.status.code(), Some(1), "{o:?}");
+        assert!(o.stdout.is_empty(), "{o:?}");
+    }
+    assert_eq!(rows(&["query", st, "--input", "policy:refund@13"]).len(), 1);
     std::fs::remove_dir_all(&t).unwrap();
 }

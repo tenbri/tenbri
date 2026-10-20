@@ -4,8 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tenbri-openai-agents"
-# ponytail: a placeholder until releases carry the adapters; Release Please moves only the
-# workspace version today (release-please-config.json), and nothing publishes this package yet.
+# Set by release.yml from the tag, like the npm packages: one version for everything.
 version = "0.0.0"
 description = "Tenbri for the OpenAI Agents SDK: every tool call, handoff and approval signed, chained and provable."
 readme = "README.md"
