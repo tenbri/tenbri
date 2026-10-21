@@ -3,7 +3,9 @@
 
 Explicit arguments win over environment variables:
 
-- ``TENBRI_STREAM``: the stream, a directory or ``s3://bucket/prefix`` (``r2://`` too);
+- ``TENBRI_STREAM``: the stream, a directory or ``s3://bucket/prefix`` (``r2://`` too), or a
+  tenbrid, ``https://host/<stream>``, which signs so this process holds no key;
+- ``TENBRI_TOKEN``: the bearer token for a tenbrid;
 - ``TENBRI_KEYS``: the keys directory, apart from the stream (default ``~/.config/tenbri/keys``);
 - ``TENBRI_AGENT``: who acts when nothing narrower says (``agent:support``);
 - ``TENBRI_APPROVER``: who answers the frameworks' approval prompts (``person:alice``);

@@ -110,7 +110,12 @@ fn schemas(py: Python<'_>, path: PathBuf) -> PyResult<String> {
 }
 
 fn options(keys: Option<PathBuf>, key: Option<String>, create: bool) -> Options {
-    Options { keys, key, create }
+    Options {
+        keys,
+        key,
+        create,
+        ..Options::default()
+    }
 }
 
 /// One open stream; see tenbri_bindings::Stream.

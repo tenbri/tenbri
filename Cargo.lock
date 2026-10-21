@@ -3388,15 +3388,18 @@ dependencies = [
 name = "tenbri-bindings"
 version = "0.1.0-beta.5"
 dependencies = [
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "tenbri-core",
  "tenbri-crypt",
  "tenbri-keys",
  "tenbri-schema",
+ "tenbri-server",
  "tenbri-store",
  "tenbri-writer",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -3528,6 +3531,15 @@ dependencies = [
 [[package]]
 name = "tenbri-proxy"
 version = "0.1.0-beta.5"
+dependencies = [
+ "serde_json",
+ "tenbri-bindings",
+ "tenbri-core",
+ "tenbri-keys",
+ "tenbri-store",
+ "tenbri-writer",
+ "tokio",
+]
 
 [[package]]
 name = "tenbri-py"

@@ -454,7 +454,11 @@ class Tenbri(_Log):
         digest_key: bytes | None = None,
     ) -> Tenbri:
         """Opens the stream at ``url``: a directory, ``file://...``, ``s3://bucket/prefix`` or
-        ``r2://bucket/prefix`` (credentials from ``AWS_*``; ``CLOUDFLARE_ACCOUNT_ID`` for R2).
+        ``r2://bucket/prefix`` (credentials from ``AWS_*``; ``CLOUDFLARE_ACCOUNT_ID`` for R2), or
+        a tenbrid, ``https://host[:port]/<stream>`` (``http://`` on loopback only), with the bearer
+        token in ``$TENBRI_TOKEN``: tenbrid holds the keys and signs, so the agent holds none.
+        Through tenbrid, ``keys`` and ``create`` are not used, and input digests need
+        ``digest_key``.
 
         ``keys`` is the keys directory (default ``$TENBRI_KEYS``, else ``~/.config/tenbri/keys``),
         never inside the stream; without the stream's keys there, the stream is read-only.
