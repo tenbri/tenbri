@@ -135,6 +135,22 @@ impl Remote {
         .to_string())
     }
 
+    /// The keyed digest of an input under tenbrid's data key for `subject`.
+    pub(crate) async fn digest(
+        &self,
+        subject: Option<&str>,
+        content: &[u8],
+    ) -> Result<String, Error> {
+        let body = serde_json::json!({
+            "subject": subject,
+            "content": tenbri_merkle::checkpoint::base64(content),
+        });
+        let out: Digest = self
+            .call(Method::POST, "digest", Some(body.to_string().into_bytes()))
+            .await?;
+        Ok(out.digest)
+    }
+
     /// The entries matching `f`, as [`crate::Stream::query`] returns them, page by page.
     pub(crate) async fn query(&self, f: &Filter) -> Result<String, Error> {
         let mut out = Vec::new();
@@ -283,6 +299,11 @@ struct Batch {
 #[derive(Deserialize)]
 struct Appended {
     entry: Box<serde_json::value::RawValue>,
+}
+
+#[derive(Deserialize)]
+struct Digest {
+    digest: String,
 }
 
 #[derive(Deserialize)]

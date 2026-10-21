@@ -100,5 +100,16 @@ async fn writes_through_tenbrid_without_keys() {
         "two key entries, intent, outcome"
     );
     assert_eq!(v["pinned_key"], stream_key.fingerprint());
-    assert!(s.digest(None, b"x").is_err(), "no data key in the agent");
+    // tenbrid keys the digest with its data key, as the agent would with the keys in hand.
+    let data = tenbri_crypt::DataKeys::open(&ks).unwrap();
+    assert_eq!(
+        s.digest(Some("cust_42"), b"x").await.unwrap(),
+        data.digest(Some("cust_42"), b"x").unwrap()
+    );
+    assert_eq!(
+        s.digest(None, b"x").await.unwrap(),
+        data.digest(None, b"x").unwrap()
+    );
+    let e = s.digest(Some(""), b"x").await.err().unwrap();
+    assert_eq!(e.code, tenbri_bindings::INVALID_REQUEST);
 }

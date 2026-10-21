@@ -24,6 +24,7 @@ serde_urlencoded = "0.7"
 sha2 = "0.11"
 tenbri-anchor = { workspace = true, features = ["client"] }
 tenbri-core.workspace = true
+tenbri-crypt.workspace = true
 tenbri-index.workspace = true
 tenbri-otlp.workspace = true
 tenbri-keys.workspace = true

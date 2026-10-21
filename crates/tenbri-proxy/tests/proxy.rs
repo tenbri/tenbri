@@ -157,3 +157,33 @@ async fn refuses_a_call_it_cannot_record() {
         .await;
     assert_eq!(server.recv().await["id"], 8);
 }
+
+#[tokio::test]
+async fn pins_the_arguments_by_keyed_digest() {
+    let s = stream("args").await;
+    let (mut client, mut server, _task) = proxy(s.clone());
+    // Key order as sent does not change the digest.
+    client
+        .send(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "issue_refund", "arguments": {"charge": "ch_1", "amount": 20}}}))
+        .await;
+    server.recv().await;
+    // No arguments, no input.
+    client
+        .send(
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "ping"}}),
+        )
+        .await;
+    server.recv().await;
+
+    let d = decisions(&s).await;
+    assert_eq!(
+        d[0]["inputs"],
+        json!([{
+            "ref": "mcp:issue_refund/arguments",
+            "version": tenbri_proxy::ARGUMENTS_VERSION,
+            "digest": s.digest(None, br#"{"amount":20,"charge":"ch_1"}"#).await.unwrap(),
+        }])
+    );
+    assert!(d[1].get("inputs").is_none(), "{}", d[1]);
+}

@@ -322,4 +322,23 @@ impl TenbriService for Grpc {
             schemas_json: self.0.schemas_json().to_string(),
         }))
     }
+
+    async fn digest_input(
+        &self,
+        r: Request<pb::DigestInputRequest>,
+    ) -> Result<Response<pb::DigestInputResponse>, Status> {
+        let t = self.caller(r.metadata())?;
+        let pb::DigestInputRequest {
+            stream,
+            subject,
+            content,
+        } = r.into_inner();
+        let subject = (!subject.is_empty()).then_some(subject);
+        let digest = self
+            .0
+            .digest(&t, &stream, subject, content)
+            .await
+            .map_err(status)?;
+        Ok(Response::new(pb::DigestInputResponse { digest }))
+    }
 }

@@ -1056,3 +1056,96 @@ async fn traceparent_round_trip() {
     s.stop().await;
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// The digest route answers what an SDK holding the keys computes itself, over REST and gRPC, for
+/// the token's streams only.
+#[tokio::test(flavor = "multi_thread")]
+async fn digest_with_the_streams_data_key() {
+    let dir = tmp("digest");
+    init(&dir, "support").await;
+    init(&dir, "other").await;
+    let s = start(&dir, "").await;
+    let path = "/v1/streams/support/digest";
+
+    let (st, v) = post(
+        &s,
+        path,
+        Some(AGENT),
+        None,
+        r#"{"subject":"subj:42","content":"eA=="}"#,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let (_, verified) = get(&s, "/v1/streams/support/verify", Some(AGENT)).await;
+    let ks = KeyStore::open(
+        &dir.join("keys"),
+        &dir.join("audit/support"),
+        verified["stream"].as_str().unwrap(),
+    )
+    .unwrap();
+    let keys = tenbri_crypt::DataKeys::open(&ks).unwrap();
+    assert_eq!(v["digest"], keys.digest(Some("subj:42"), b"x").unwrap());
+    let (_, tenant) = post(&s, path, Some(AGENT), None, r#"{"content":"eA=="}"#).await;
+    assert_eq!(tenant["digest"], keys.digest(None, b"x").unwrap());
+    assert_ne!(tenant["digest"], v["digest"], "a key per subject");
+
+    for (token, body, status, c) in [
+        (None, r#"{"content":"eA=="}"#, 401, "TENBRI_UNAUTHENTICATED"),
+        (
+            Some(OTHER),
+            r#"{"content":"eA=="}"#,
+            403,
+            "TENBRI_FORBIDDEN",
+        ),
+        (
+            Some(AGENT),
+            r#"{"content":"eA"}"#,
+            400,
+            "TENBRI_INVALID_REQUEST",
+        ),
+        (
+            Some(AGENT),
+            r#"{"content":"eA==","x":1}"#,
+            400,
+            "TENBRI_INVALID_REQUEST",
+        ),
+        (
+            Some(AGENT),
+            r#"{"subject":"","content":"eA=="}"#,
+            400,
+            "TENBRI_INVALID_REQUEST",
+        ),
+        (Some(AGENT), r#"{}"#, 400, "TENBRI_INVALID_REQUEST"),
+    ] {
+        let (st, v) = post(&s, path, token, None, body).await;
+        assert_eq!((st.as_u16(), code(&v)), (status, c), "{body}");
+    }
+
+    let mut c = s.grpc().await;
+    let r = c
+        .digest_input(authed(
+            AGENT,
+            pb::DigestInputRequest {
+                stream: "support".into(),
+                subject: "subj:42".into(),
+                content: b"x".to_vec(),
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(v["digest"], r.into_inner().digest);
+    let err = c
+        .digest_input(authed(
+            OTHER,
+            pb::DigestInputRequest {
+                stream: "support".into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(tenbri_code(&err), "TENBRI_FORBIDDEN");
+
+    s.stop().await;
+    std::fs::remove_dir_all(&dir).unwrap();
+}

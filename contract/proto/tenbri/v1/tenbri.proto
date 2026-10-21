@@ -34,6 +34,10 @@ service TenbriService {
   rpc VerifyStream(VerifyStreamRequest) returns (VerifyStreamResponse);
   // The action schemas from tenbri.toml.
   rpc ListSchemas(ListSchemasRequest) returns (ListSchemasResponse);
+
+  // The keyed digest of an input under the stream's data key for `subject` (spec/privacy.md), for
+  // a caller that holds a token and no keys. The key is made on first use.
+  rpc DigestInput(DigestInputRequest) returns (DigestInputResponse);
 }
 
 message AppendIntentRequest {
@@ -212,4 +216,17 @@ message ListSchemasRequest {}
 message ListSchemasResponse {
   // tenbri.toml as JSON: {"unknown_actions": ..., "actions": {...}}.
   string schemas_json = 1;
+}
+
+message DigestInputRequest {
+  string stream = 1;
+  // The subject handle whose data key digests it; empty for the tenant's key.
+  string subject = 2;
+  // The input's bytes.
+  bytes content = 3;
+}
+
+message DigestInputResponse {
+  // `hmac-sha256:<hex>`, for the input's `digest`.
+  string digest = 1;
 }

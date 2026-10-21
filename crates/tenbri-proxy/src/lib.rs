@@ -6,6 +6,9 @@
 //! closes it: `ok`, or `error` for a JSON-RPC error or a result with `isError`. A call the server
 //! never answers is closed `unknown` when either side hangs up.
 //!
+//! The intent pins the call's `arguments` as an input, `mcp:<tool>/arguments` at
+//! [`ARGUMENTS_VERSION`], by keyed digest.
+//!
 //! The record comes from what crossed the wire, not from the agent's account of it. Opened on a
 //! tenbrid (`https://host/<stream>`), the proxy holds a token and no signing key.
 //!
@@ -32,6 +35,10 @@ pub fn principal(s: &str) -> Option<Value> {
     (matches!(kind, "agent" | "person" | "service") && !id.is_empty())
         .then(|| json!({ "kind": kind, "id": id }))
 }
+
+/// The `version` of a call's pinned arguments: the digest is of their JSON, compact with keys
+/// sorted.
+pub const ARGUMENTS_VERSION: &str = "json-sorted-keys";
 
 /// How long the server may take to answer its last calls once the client has hung up.
 pub const DRAIN: std::time::Duration = std::time::Duration::from_secs(5);
@@ -208,8 +215,19 @@ async fn record(
                 "tools/call names no tool",
             )
         })?;
-    // ponytail: no inputs yet; the arguments get pinned as a keyed digest once tenbrid digests.
     let mut d = json!({ "action": { "type": tool }, "source": "proxy" });
+    // The arguments as sent, pinned by a keyed digest (the tenant's data key): a value guessed
+    // later can be confirmed with the key, never read off the log.
+    if let Some(args) = call["params"].get("arguments") {
+        // ponytail: compact JSON with sorted keys (serde_json without preserve_order), not
+        // RFC 8785: floats may print otherwise elsewhere. Move to canon once it takes fractions.
+        let digest = stream.digest(None, args.to_string().as_bytes()).await?;
+        d["inputs"] = json!([{
+            "ref": format!("mcp:{tool}/arguments"),
+            "version": ARGUMENTS_VERSION,
+            "digest": digest,
+        }]);
+    }
     if let Some(p) = principal {
         d["principal"] = p.clone();
     }

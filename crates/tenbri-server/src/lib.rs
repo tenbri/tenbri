@@ -149,6 +149,8 @@ struct Lane {
     query_index: std::sync::Mutex<Box<dyn tenbri_index::Backend>>,
     tx: broadcast::Sender<Arc<Stored>>,
     writable: AtomicBool,
+    /// The stream's key store, beside which its data keys live (spec/privacy.md).
+    keys: KeyStore,
 }
 
 /// ponytail: every entry in memory, by position (`seq - 1`) and id, verified, for get, tail and
@@ -540,6 +542,31 @@ impl Daemon {
         })
     }
 
+    /// The keyed digest of an input, `hmac-sha256:<hex>`, under the data key of `subject` (the
+    /// tenant's without one), made on first use: what an SDK holding the keys computes itself, for
+    /// a caller that holds only a token (spec/privacy.md).
+    pub async fn digest(
+        &self,
+        token: &Token,
+        stream: &str,
+        subject: Option<String>,
+        content: Vec<u8>,
+    ) -> Result<String, ApiError> {
+        let keys = self.lane(token, stream)?.keys.clone();
+        tokio::task::spawn_blocking(move || {
+            tenbri_crypt::DataKeys::open(&keys)?
+                .digest(subject.as_deref(), &content)
+                .map_err(|e| match e {
+                    tenbri_crypt::Error::Io(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
+                        ApiError::new(ErrorCode::InvalidRequest, e.to_string())
+                    }
+                    e => ApiError::new(ErrorCode::StoreUnavailable, e.to_string()),
+                })
+        })
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::Internal, e.to_string()))?
+    }
+
     /// Stops readiness and ends every tail.
     pub fn begin_shutdown(&self) {
         self.shutdown.send_replace(true);
@@ -599,7 +626,7 @@ impl Lane {
             .with_checkpoints(Some(ks.dir().join(CHECKPOINT_FILE)))
             .await
             .map_err(|e| e.to_string())?;
-        let writable = match writer.use_keys(ks).await {
+        let writable = match writer.use_keys(ks.clone()).await {
             Ok(()) => true,
             Err(e) => {
                 eprintln!("tenbrid: stream {name}: not writable: {e}");
@@ -623,6 +650,7 @@ impl Lane {
             query_index: std::sync::Mutex::new(query_index),
             tx: broadcast::channel(TAIL_BUFFER).0,
             writable: AtomicBool::new(writable),
+            keys: ks,
         };
         lane.sync().await.map_err(|e| e.to_string())?;
         // The query index is rebuilt from the stream just read and verified: whatever the file

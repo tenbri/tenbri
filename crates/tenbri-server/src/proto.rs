@@ -230,6 +230,23 @@ pub struct ListSchemasResponse {
     #[prost(string, tag = "1")]
     pub schemas_json: ::prost::alloc::string::String,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DigestInputRequest {
+    #[prost(string, tag = "1")]
+    pub stream: ::prost::alloc::string::String,
+    /// The subject handle whose data key digests it; empty for the tenant's key.
+    #[prost(string, tag = "2")]
+    pub subject: ::prost::alloc::string::String,
+    /// The input's bytes.
+    #[prost(bytes = "vec", tag = "3")]
+    pub content: ::prost::alloc::vec::Vec<u8>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DigestInputResponse {
+    /// `hmac-sha256:<hex>`, for the input's `digest`.
+    #[prost(string, tag = "1")]
+    pub digest: ::prost::alloc::string::String,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum Verification {
@@ -592,6 +609,32 @@ pub mod tenbri_service_client {
                 .insert(GrpcMethod::new("tenbri.v1.TenbriService", "ListSchemas"));
             self.inner.unary(req, path, codec).await
         }
+        /// The keyed digest of an input under the stream's data key for `subject` (spec/privacy.md), for
+        /// a caller that holds a token and no keys. The key is made on first use.
+        pub async fn digest_input(
+            &mut self,
+            request: impl tonic::IntoRequest<super::DigestInputRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::DigestInputResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/tenbri.v1.TenbriService/DigestInput",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("tenbri.v1.TenbriService", "DigestInput"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -692,6 +735,15 @@ pub mod tenbri_service_server {
             request: tonic::Request<super::ListSchemasRequest>,
         ) -> std::result::Result<
             tonic::Response<super::ListSchemasResponse>,
+            tonic::Status,
+        >;
+        /// The keyed digest of an input under the stream's data key for `subject` (spec/privacy.md), for
+        /// a caller that holds a token and no keys. The key is made on first use.
+        async fn digest_input(
+            &self,
+            request: tonic::Request<super::DigestInputRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::DigestInputResponse>,
             tonic::Status,
         >;
     }
@@ -1207,6 +1259,51 @@ pub mod tenbri_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = ListSchemasSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/tenbri.v1.TenbriService/DigestInput" => {
+                    #[allow(non_camel_case_types)]
+                    struct DigestInputSvc<T: TenbriService>(pub Arc<T>);
+                    impl<
+                        T: TenbriService,
+                    > tonic::server::UnaryService<super::DigestInputRequest>
+                    for DigestInputSvc<T> {
+                        type Response = super::DigestInputResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::DigestInputRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TenbriService>::digest_input(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = DigestInputSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

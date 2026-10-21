@@ -55,8 +55,8 @@ variable:
 | `schema` | `TENBRI_SCHEMA` | The action schemas; default `./tenbri.toml` when there is one |
 | `failOpen` | | Run actions, unrecorded and with a warning, when their intent cannot be written. Default: block them |
 
-Input digests are keyed by the stream's local key store (per subject, so erasing a subject's key
-leaves its digests unconfirmable): no secret in code. `digestKey` keys them yourself instead.
+Input digests are keyed by the stream's local key store, or tenbrid's (per subject, so erasing a
+subject's key leaves its digests unconfirmable): no secret in code. `digestKey` keys them yourself instead.
 
 ## Advanced: the stream itself
 

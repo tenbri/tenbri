@@ -81,14 +81,15 @@ impl Stream {
     }
 
     /// The keyed digest of `content` under `subject`'s data key (the tenant's without one) from
-    /// this machine's key store.
+    /// this machine's key store, or from tenbrid's. Synchronous, as tenbri.js and the adapters call
+    /// it: through tenbrid it waits for the answer.
     #[napi]
     pub fn digest(
         &self,
         subject: Option<String>,
         content: napi::bindgen_prelude::Buffer,
     ) -> Result<String> {
-        self.0.digest(subject.as_deref(), &content).map_err(err)
+        napi::bindgen_prelude::block_on(self.0.digest(subject.as_deref(), &content)).map_err(err)
     }
 
     #[napi]

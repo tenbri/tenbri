@@ -114,6 +114,41 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
       security:
       - token: []
+  /v1/streams/{stream}/digest:
+    post:
+      summary: |-
+        The keyed digest of an input under the stream's data key for `subject` (spec/privacy.md), for a
+        caller that holds a token and no keys. The key is made on first use; erasing it leaves every
+        digest made with it unconfirmable.
+      operationId: digest_input
+      parameters:
+      - name: stream
+        in: path
+        description: The stream's name or id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DigestRequest'
+        required: true
+      responses:
+        '200':
+          description: The digest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DigestBody'
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - token: []
   /v1/streams/{stream}/entries:
     get:
       summary: |-
@@ -614,6 +649,29 @@ components:
           type: integer
           format: int64
           minimum: 0
+    DigestBody:
+      type: object
+      required:
+      - digest
+      properties:
+        digest:
+          type: string
+          description: '`hmac-sha256:<hex>`, for the input''s `digest`.'
+    DigestRequest:
+      type: object
+      description: An input to digest.
+      required:
+      - content
+      properties:
+        content:
+          type: string
+          description: The input's bytes, standard base64 with padding.
+        subject:
+          type:
+          - string
+          - 'null'
+          description: The subject handle whose data key digests it; the tenant's key without one.
+      additionalProperties: false
     ErrorBody:
       type: object
       description: 'A failed request: the body of every REST error and of gRPC''s `tenbri-error-bin`.'

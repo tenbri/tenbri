@@ -99,7 +99,8 @@ export declare class Tenbri {
   /** Whether this machine holds the keys to write the stream. */
   readonly writable: boolean
   /** The keyed digest of an input, `hmac-sha256:<hex>`: with the `digestKey` given at open, else
-   * `subject`'s data key (the tenant's without one) from the local key store. */
+   * `subject`'s data key (the tenant's without one) from the local key store, or tenbrid's (a
+   * blocking round trip). */
   digest(content: string | Uint8Array, options?: { subject?: string }): string
   append(entry: Draft): Promise<Entry>
   /** Records an intent, durable before the action runs. */
