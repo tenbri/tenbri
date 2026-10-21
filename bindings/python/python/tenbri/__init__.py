@@ -458,7 +458,8 @@ class Tenbri(_Log):
         ``r2://bucket/prefix`` (credentials from ``AWS_*``; ``CLOUDFLARE_ACCOUNT_ID`` for R2), or
         a tenbrid, ``https://host[:port]/<stream>`` (``http://`` on loopback only), with the bearer
         token in ``$TENBRI_TOKEN``: tenbrid holds the keys and signs, so the agent holds none.
-        Through tenbrid, ``keys`` and ``create`` are not used, and tenbrid keys input digests.
+        Through tenbrid, ``keys`` and ``create`` are not used, and tenbrid keys input digests if
+        the token has ``digest = true`` (a subject's data key must exist there).
 
         ``keys`` is the keys directory (default ``$TENBRI_KEYS``, else ``~/.config/tenbri/keys``),
         never inside the stream; without the stream's keys there, the stream is read-only.

@@ -269,7 +269,7 @@ struct BrokenBody {
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct DigestRequest {
-    /// The subject handle whose data key digests it; the tenant's key without one.
+    /// The subject handle whose data key digests it; the tenant's key without one. Never empty.
     subject: Option<String>,
     /// The input's bytes, standard base64 with padding.
     content: String,
@@ -685,9 +685,12 @@ async fn verify_stream(
     }))
 }
 
-/// The keyed digest of an input under the stream's data key for `subject` (spec/privacy.md), for a
-/// caller that holds a token and no keys. The key is made on first use; erasing it leaves every
-/// digest made with it unconfirmable.
+/// The keyed digest of an input under the stream's newest data key for `subject` (spec/privacy.md,
+/// section 3), for a caller that holds a token and no keys. Only tokens configured with
+/// `digest = true` may ask (TENBRI_FORBIDDEN otherwise): the answer confirms a guessed input
+/// against the log's digests. The tenant's key (no `subject`) is made on first use; a subject's
+/// never is here, so a subject without a data key is TENBRI_NOT_FOUND. `subject` is never empty
+/// (TENBRI_INVALID_REQUEST); over gRPC an empty `subject` means the tenant's key.
 #[utoipa::path(
     post,
     path = "/v1/streams/{stream}/digest",

@@ -7,7 +7,8 @@
 //! never answers is closed `unknown` when either side hangs up.
 //!
 //! The intent pins the call's `arguments` as an input, `mcp:<tool>/arguments` at
-//! [`ARGUMENTS_VERSION`], by keyed digest.
+//! [`ARGUMENTS_VERSION`], by keyed digest. Through tenbrid that needs its digest route and a token
+//! with `digest = true`; when the digest fails, the call is refused like one whose intent failed.
 //!
 //! The record comes from what crossed the wire, not from the agent's account of it. Opened on a
 //! tenbrid (`https://host/<stream>`), the proxy holds a token and no signing key.
@@ -18,6 +19,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
+use serde_json::value::RawValue;
 use serde_json::{Value, json};
 use tenbri_bindings::Stream;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
@@ -36,8 +39,10 @@ pub fn principal(s: &str) -> Option<Value> {
         .then(|| json!({ "kind": kind, "id": id }))
 }
 
-/// The `version` of a call's pinned arguments: the digest is of their JSON, compact with keys
-/// sorted.
+/// The `version` of a call's pinned arguments: the digest is of their JSON, compact, with object
+/// keys sorted by their UTF-8 bytes, strings escaped as serde_json writes them (`"`, `\\` and
+/// control characters only; `\u00xx` for the controls without a short form), and numbers exactly
+/// as sent. A call whose `params` or `arguments` repeat a key is refused.
 pub const ARGUMENTS_VERSION: &str = "json-sorted-keys";
 
 /// How long the server may take to answer its last calls once the client has hung up.
@@ -124,7 +129,7 @@ where
         match &msg {
             Some(m) if is_call(m) => {
                 let id = m["id"].clone();
-                match record(&stream, principal.as_ref(), m).await {
+                match record(&stream, principal.as_ref(), m, &line).await {
                     Ok(intent) => {
                         pending.lock().await.insert(id.to_string(), intent);
                     }
@@ -200,11 +205,12 @@ fn is_call(m: &Value) -> bool {
     m.get("method").and_then(Value::as_str) == Some("tools/call") && m.get("id").is_some()
 }
 
-/// Writes the intent of a `tools/call`; returns it as stored.
+/// Writes the intent of a `tools/call` (`call`, parsed from `line`); returns it as stored.
 async fn record(
     stream: &Stream,
     principal: Option<&Value>,
     call: &Value,
+    line: &str,
 ) -> Result<String, tenbri_bindings::Error> {
     let tool = call["params"]["name"]
         .as_str()
@@ -218,10 +224,23 @@ async fn record(
     let mut d = json!({ "action": { "type": tool }, "source": "proxy" });
     // The arguments as sent, pinned by a keyed digest (the tenant's data key): a value guessed
     // later can be confirmed with the key, never read off the log.
-    if let Some(args) = call["params"].get("arguments") {
-        // ponytail: compact JSON with sorted keys (serde_json without preserve_order), not
-        // RFC 8785: floats may print otherwise elsewhere. Move to canon once it takes fractions.
-        let digest = stream.digest(None, args.to_string().as_bytes()).await?;
+    let args = pairs(line)
+        .and_then(|m| member(&m, "params"))
+        .and_then(|p| pairs(p.get()))
+        .map(|m| member(&m, "arguments").map(|a| canonical(&a)));
+    let args = match args {
+        Some(None) => None,
+        Some(Some(Some(a))) => Some(a),
+        // Which duplicate the server reads is its choice, so no digest pins what it runs.
+        _ => {
+            return Err(tenbri_bindings::Error::new(
+                tenbri_bindings::INVALID_REQUEST,
+                "tools/call with a duplicate key in its params or arguments",
+            ));
+        }
+    };
+    if let Some(args) = args {
+        let digest = stream.digest(None, args.as_bytes()).await?;
         d["inputs"] = json!([{
             "ref": format!("mcp:{tool}/arguments"),
             "version": ARGUMENTS_VERSION,
@@ -234,6 +253,68 @@ async fn record(
     stream
         .intent(&serde_json::to_vec(&d).expect("JSON serializes"))
         .await
+}
+
+/// A JSON object's members in order, duplicates kept.
+struct Pairs(Vec<(String, Box<RawValue>)>);
+
+impl<'de> Deserialize<'de> for Pairs {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Pairs, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = Pairs;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut m: A) -> Result<Pairs, A::Error> {
+                let mut v = Vec::new();
+                while let Some(e) = m.next_entry()? {
+                    v.push(e);
+                }
+                Ok(Pairs(v))
+            }
+        }
+        d.deserialize_map(V)
+    }
+}
+
+/// The members of the object `raw`, sorted by key; None if it is not an object or repeats a key.
+fn pairs(raw: &str) -> Option<Vec<(String, Box<RawValue>)>> {
+    let mut v = serde_json::from_str::<Pairs>(raw).ok()?.0;
+    v.sort_by(|a, b| a.0.cmp(&b.0));
+    v.windows(2).all(|w| w[0].0 != w[1].0).then_some(v)
+}
+
+fn member(m: &[(String, Box<RawValue>)], key: &str) -> Option<Box<RawValue>> {
+    m.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+}
+
+/// `v` as compact JSON, object keys sorted by their UTF-8 bytes, strings re-escaped as serde_json
+/// writes them, and numbers exactly as sent: never through f64, so two different numbers never
+/// share a digest. None if an object repeats a key. ([`ARGUMENTS_VERSION`])
+fn canonical(v: &RawValue) -> Option<String> {
+    let raw = v.get().trim();
+    match raw.as_bytes().first()? {
+        b'{' => {
+            let mut out = Vec::new();
+            for (k, v) in pairs(raw)? {
+                out.push(format!(
+                    "{}:{}",
+                    serde_json::to_string(&k).ok()?,
+                    canonical(&v)?
+                ));
+            }
+            Some(format!("{{{}}}", out.join(",")))
+        }
+        b'[' => {
+            let items: Vec<Box<RawValue>> = serde_json::from_str(raw).ok()?;
+            let out: Option<Vec<String>> = items.iter().map(|i| canonical(i)).collect();
+            Some(format!("[{}]", out?.join(",")))
+        }
+        b'"' => serde_json::to_string(&serde_json::from_str::<String>(raw).ok()?).ok(),
+        // A number, true, false or null: as sent.
+        _ => Some(raw.to_owned()),
+    }
 }
 
 fn refusal(id: &Value, why: &str) -> Value {

@@ -219,6 +219,15 @@ impl DataKeys {
         Ok(digest(&key, content))
     }
 
+    /// As [`DataKeys::digest`], but never makes a key: [`Error::NoKey`] when `subject` has none.
+    pub fn digest_held(&self, subject: Option<&str>, content: &[u8]) -> Result<String, Error> {
+        check_subject(subject)?;
+        match self.epochs(subject)?.pop() {
+            Some((_, key)) => Ok(digest(&key, content)),
+            None => Err(Error::NoKey(subject.map(str::to_owned))),
+        }
+    }
+
     /// Whether `digest` is the digest of `content` under any of `subject`'s key epochs.
     pub fn confirm(&self, subject: Option<&str>, content: &[u8], d: &str) -> Result<bool, Error> {
         let epochs = self.epochs(subject)?;

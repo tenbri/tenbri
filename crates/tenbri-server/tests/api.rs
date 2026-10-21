@@ -84,6 +84,7 @@ path = "audit/other"
 [[tokens]]
 sha256 = "{}"
 principal = {{ kind = "agent", id = "a" }}
+digest = true
 
 [[tokens]]
 sha256 = "{}"
@@ -1058,7 +1059,7 @@ async fn traceparent_round_trip() {
 }
 
 /// The digest route answers what an SDK holding the keys computes itself, over REST and gRPC, for
-/// the token's streams only.
+/// tokens that opted in, on their streams, and never makes a subject's key.
 #[tokio::test(flavor = "multi_thread")]
 async fn digest_with_the_streams_data_key() {
     let dir = tmp("digest");
@@ -1066,16 +1067,6 @@ async fn digest_with_the_streams_data_key() {
     init(&dir, "other").await;
     let s = start(&dir, "").await;
     let path = "/v1/streams/support/digest";
-
-    let (st, v) = post(
-        &s,
-        path,
-        Some(AGENT),
-        None,
-        r#"{"subject":"subj:42","content":"eA=="}"#,
-    )
-    .await;
-    assert_eq!(st, StatusCode::OK, "{v}");
     let (_, verified) = get(&s, "/v1/streams/support/verify", Some(AGENT)).await;
     let ks = KeyStore::open(
         &dir.join("keys"),
@@ -1084,67 +1075,93 @@ async fn digest_with_the_streams_data_key() {
     )
     .unwrap();
     let keys = tenbri_crypt::DataKeys::open(&ks).unwrap();
-    assert_eq!(v["digest"], keys.digest(Some("subj:42"), b"x").unwrap());
-    let (_, tenant) = post(&s, path, Some(AGENT), None, r#"{"content":"eA=="}"#).await;
+    let subject = r#"{"subject":"subj:42","content":"eA=="}"#;
+
+    // No key for the subject yet: refused, and none is made.
+    let (st, v) = post(&s, path, Some(AGENT), None, subject).await;
+    assert_eq!((st.as_u16(), code(&v)), (404, "TENBRI_NOT_FOUND"), "{v}");
+    assert!(keys.list().unwrap().is_empty(), "no key file made");
+
+    // The tenant's key is made on first use; a subject's once the writer has made it.
+    let (st, tenant) = post(&s, path, Some(AGENT), None, r#"{"content":"eA=="}"#).await;
+    assert_eq!(st, StatusCode::OK, "{tenant}");
     assert_eq!(tenant["digest"], keys.digest(None, b"x").unwrap());
+    let expected = keys.digest(Some("subj:42"), b"x").unwrap();
+    let (st, v) = post(&s, path, Some(AGENT), None, subject).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert_eq!(v["digest"], expected);
     assert_ne!(tenant["digest"], v["digest"], "a key per subject");
 
-    for (token, body, status, c) in [
-        (None, r#"{"content":"eA=="}"#, 401, "TENBRI_UNAUTHENTICATED"),
+    for (token, path, body, status, c) in [
+        (None, path, subject, 401, "TENBRI_UNAUTHENTICATED"),
+        // Not opted in: the default.
+        (Some(ALICE), path, subject, 403, "TENBRI_FORBIDDEN"),
+        (Some(OTHER), path, subject, 403, "TENBRI_FORBIDDEN"),
         (
-            Some(OTHER),
-            r#"{"content":"eA=="}"#,
-            403,
-            "TENBRI_FORBIDDEN",
+            Some(AGENT),
+            "/v1/streams/nope/digest",
+            subject,
+            404,
+            "TENBRI_NOT_FOUND",
         ),
         (
             Some(AGENT),
+            path,
             r#"{"content":"eA"}"#,
             400,
             "TENBRI_INVALID_REQUEST",
         ),
         (
             Some(AGENT),
+            path,
             r#"{"content":"eA==","x":1}"#,
             400,
             "TENBRI_INVALID_REQUEST",
         ),
         (
             Some(AGENT),
+            path,
             r#"{"subject":"","content":"eA=="}"#,
             400,
             "TENBRI_INVALID_REQUEST",
         ),
-        (Some(AGENT), r#"{}"#, 400, "TENBRI_INVALID_REQUEST"),
+        (Some(AGENT), path, r#"{}"#, 400, "TENBRI_INVALID_REQUEST"),
     ] {
         let (st, v) = post(&s, path, token, None, body).await;
-        assert_eq!((st.as_u16(), code(&v)), (status, c), "{body}");
+        assert_eq!((st.as_u16(), code(&v)), (status, c), "{path} {body}");
     }
 
     let mut c = s.grpc().await;
-    let r = c
-        .digest_input(authed(
-            AGENT,
+    let req = |token: &str, subject: &str| {
+        authed(
+            token,
             pb::DigestInputRequest {
                 stream: "support".into(),
-                subject: "subj:42".into(),
+                subject: subject.into(),
                 content: b"x".to_vec(),
             },
-        ))
-        .await
-        .unwrap();
-    assert_eq!(v["digest"], r.into_inner().digest);
-    let err = c
-        .digest_input(authed(
-            OTHER,
-            pb::DigestInputRequest {
-                stream: "support".into(),
-                ..Default::default()
-            },
-        ))
-        .await
-        .unwrap_err();
-    assert_eq!(tenbri_code(&err), "TENBRI_FORBIDDEN");
+        )
+    };
+    let r = c.digest_input(req(AGENT, "subj:42")).await.unwrap();
+    assert_eq!(r.into_inner().digest, expected);
+    // Over gRPC an empty subject is the tenant's key.
+    let r = c.digest_input(req(AGENT, "")).await.unwrap();
+    assert_eq!(r.into_inner().digest, tenant["digest"]);
+    for (token, subject, want) in [
+        (
+            ALICE,
+            "",
+            (tonic::Code::PermissionDenied, "TENBRI_FORBIDDEN"),
+        ),
+        (
+            AGENT,
+            "subj:unknown",
+            (tonic::Code::NotFound, "TENBRI_NOT_FOUND"),
+        ),
+    ] {
+        let err = c.digest_input(req(token, subject)).await.unwrap_err();
+        assert_eq!((err.code(), tenbri_code(&err)), want, "{subject}");
+    }
 
     s.stop().await;
     std::fs::remove_dir_all(&dir).unwrap();

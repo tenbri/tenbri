@@ -35,8 +35,10 @@ service TenbriService {
   // The action schemas from tenbri.toml.
   rpc ListSchemas(ListSchemasRequest) returns (ListSchemasResponse);
 
-  // The keyed digest of an input under the stream's data key for `subject` (spec/privacy.md), for
-  // a caller that holds a token and no keys. The key is made on first use.
+  // The keyed digest of an input under the stream's newest data key for `subject`
+  // (spec/privacy.md), for a caller that holds a token and no keys. Only tokens configured with
+  // `digest = true` may ask (TENBRI_FORBIDDEN otherwise). The tenant's key is made on first use; a
+  // subject without a data key is TENBRI_NOT_FOUND.
   rpc DigestInput(DigestInputRequest) returns (DigestInputResponse);
 }
 

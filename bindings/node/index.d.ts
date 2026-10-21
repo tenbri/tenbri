@@ -17,9 +17,12 @@ export declare class Stream {
   get writable(): boolean
   /**
    * The keyed digest of `content` under `subject`'s data key (the tenant's without one) from
-   * this machine's key store.
+   * this machine's key store, or from tenbrid's. Synchronous, as tenbri.js and the adapters call
+   * it: through tenbrid it waits for the answer.
    */
   digest(subject: string | undefined | null, content: Buffer): string
+  /** [`Stream::digest`] without blocking the event loop. */
+  digestAsync(subject: string | undefined | null, content: Buffer): Promise<string>
   append(draft: string): Promise<string>
   intent(draft: string): Promise<string>
   outcome(intent: string, status: string, draft: string): Promise<string>

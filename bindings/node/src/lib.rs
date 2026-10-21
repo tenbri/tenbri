@@ -92,6 +92,19 @@ impl Stream {
         napi::bindgen_prelude::block_on(self.0.digest(subject.as_deref(), &content)).map_err(err)
     }
 
+    /// [`Stream::digest`] without blocking the event loop.
+    #[napi]
+    pub async fn digest_async(
+        &self,
+        subject: Option<String>,
+        content: napi::bindgen_prelude::Buffer,
+    ) -> Result<String> {
+        self.0
+            .digest(subject.as_deref(), &content)
+            .await
+            .map_err(err)
+    }
+
     #[napi]
     pub async fn append(&self, draft: String) -> Result<String> {
         self.0.append(draft.as_bytes()).await.map_err(err)

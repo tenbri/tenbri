@@ -102,6 +102,8 @@ export declare class Tenbri {
    * `subject`'s data key (the tenant's without one) from the local key store, or tenbrid's (a
    * blocking round trip). */
   digest(content: string | Uint8Array, options?: { subject?: string }): string
+  /** As `digest`, without blocking the event loop: through tenbrid, prefer it. */
+  digestAsync(content: string | Uint8Array, options?: { subject?: string }): Promise<string>
   append(entry: Draft): Promise<Entry>
   /** Records an intent, durable before the action runs. */
   intent(draft: Draft): Promise<Entry>

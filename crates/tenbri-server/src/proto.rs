@@ -609,8 +609,10 @@ pub mod tenbri_service_client {
                 .insert(GrpcMethod::new("tenbri.v1.TenbriService", "ListSchemas"));
             self.inner.unary(req, path, codec).await
         }
-        /// The keyed digest of an input under the stream's data key for `subject` (spec/privacy.md), for
-        /// a caller that holds a token and no keys. The key is made on first use.
+        /// The keyed digest of an input under the stream's newest data key for `subject`
+        /// (spec/privacy.md), for a caller that holds a token and no keys. Only tokens configured with
+        /// `digest = true` may ask (TENBRI_FORBIDDEN otherwise). The tenant's key is made on first use; a
+        /// subject without a data key is TENBRI_NOT_FOUND.
         pub async fn digest_input(
             &mut self,
             request: impl tonic::IntoRequest<super::DigestInputRequest>,
@@ -737,8 +739,10 @@ pub mod tenbri_service_server {
             tonic::Response<super::ListSchemasResponse>,
             tonic::Status,
         >;
-        /// The keyed digest of an input under the stream's data key for `subject` (spec/privacy.md), for
-        /// a caller that holds a token and no keys. The key is made on first use.
+        /// The keyed digest of an input under the stream's newest data key for `subject`
+        /// (spec/privacy.md), for a caller that holds a token and no keys. Only tokens configured with
+        /// `digest = true` may ask (TENBRI_FORBIDDEN otherwise). The tenant's key is made on first use; a
+        /// subject without a data key is TENBRI_NOT_FOUND.
         async fn digest_input(
             &self,
             request: tonic::Request<super::DigestInputRequest>,

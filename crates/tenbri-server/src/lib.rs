@@ -69,6 +69,8 @@ pub struct Token {
     pub principal: Principal,
     /// Stream names it may use; `None`: all.
     pub streams: Option<Vec<String>>,
+    /// May use [`Daemon::digest`].
+    pub digest: bool,
 }
 
 /// An entry as stored, with its canonical JSON and its entry hash.
@@ -225,6 +227,7 @@ impl Daemon {
                 let token = Token {
                     principal: t.principal.clone(),
                     streams: t.streams.clone(),
+                    digest: t.digest,
                 };
                 (t.sha256.clone(), token)
             })
@@ -542,9 +545,11 @@ impl Daemon {
         })
     }
 
-    /// The keyed digest of an input, `hmac-sha256:<hex>`, under the data key of `subject` (the
-    /// tenant's without one), made on first use: what an SDK holding the keys computes itself, for
-    /// a caller that holds only a token (spec/privacy.md).
+    /// The keyed digest of an input, `hmac-sha256:<hex>`, under the newest data key of `subject`,
+    /// for a caller that holds a token and no keys (spec/privacy.md, section 3). Only for tokens
+    /// configured with `digest = true`: the route confirms guesses against the log's digests. The
+    /// tenant's key (no subject) is made on first use; a subject's never is, so a caller cannot
+    /// fill the key store with subjects: one without a key is TENBRI_NOT_FOUND.
     pub async fn digest(
         &self,
         token: &Token,
@@ -553,18 +558,35 @@ impl Daemon {
         content: Vec<u8>,
     ) -> Result<String, ApiError> {
         let keys = self.lane(token, stream)?.keys.clone();
+        if !token.digest {
+            return Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "this token may not ask for digests (digest = true in its [[tokens]] entry)",
+            ));
+        }
         tokio::task::spawn_blocking(move || {
-            tenbri_crypt::DataKeys::open(&keys)?
-                .digest(subject.as_deref(), &content)
-                .map_err(|e| match e {
-                    tenbri_crypt::Error::Io(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
-                        ApiError::new(ErrorCode::InvalidRequest, e.to_string())
-                    }
-                    e => ApiError::new(ErrorCode::StoreUnavailable, e.to_string()),
-                })
+            let data = tenbri_crypt::DataKeys::open(&keys).map_err(tenbri_crypt::Error::Io)?;
+            match subject.as_deref() {
+                None => data.digest(None, &content),
+                s => data.digest_held(s, &content),
+            }
         })
         .await
         .map_err(|e| ApiError::new(ErrorCode::Internal, e.to_string()))?
+        .map_err(|e| {
+            use std::io::ErrorKind as K;
+            let code = match &e {
+                tenbri_crypt::Error::NoKey(_) => ErrorCode::NotFound,
+                tenbri_crypt::Error::Io(e) => match e.kind() {
+                    K::InvalidInput => ErrorCode::InvalidRequest,
+                    // A corrupt or unreadable key file: retrying will not help.
+                    K::InvalidData | K::PermissionDenied => ErrorCode::Internal,
+                    _ => ErrorCode::StoreUnavailable,
+                },
+                _ => ErrorCode::Internal,
+            };
+            ApiError::new(code, e.to_string())
+        })
     }
 
     /// Stops readiness and ends every tail.
