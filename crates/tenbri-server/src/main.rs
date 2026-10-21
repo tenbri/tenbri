@@ -76,6 +76,11 @@ async fn run(cli: Cli) -> Result<(), String> {
     let anchoring = daemon.clone();
     let anchor = config.clone();
     tokio::spawn(async move { anchoring.anchor_every(&anchor).await });
+    #[cfg(feature = "witness")]
+    {
+        let (witnessing, config) = (daemon.clone(), config.clone());
+        tokio::spawn(async move { witnessing.witness_every(&config).await });
+    }
     serve(daemon, rest, grpc, signal())
         .await
         .map_err(|e| e.to_string())?;

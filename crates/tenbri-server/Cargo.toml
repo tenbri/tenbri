@@ -12,6 +12,10 @@ homepage.workspace = true
 name = "tenbrid"
 path = "src/main.rs"
 
+[features]
+# Witness cosignatures (Experimental): [witness] sends checkpoints to C2SP witnesses.
+witness = ["tenbri-anchor/witness", "tenbri-merkle/witness", "tenbri-writer/witness"]
+
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 clap = { version = "4", features = ["derive"] }
@@ -45,7 +49,7 @@ protox = "0.9"
 tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
 tenbri-index.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
-tenbri-anchor = { workspace = true, features = ["test-tsa"] }
+tenbri-anchor = { workspace = true, features = ["test-tsa", "test-witness"] }
 tonic = { version = "0.14", default-features = false, features = ["channel"] }
 
 [lints]

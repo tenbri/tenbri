@@ -20,6 +20,8 @@ default = ["keychain", "s3"]
 keychain = ["tenbri-keys/keychain"]
 # Streams in AWS S3, Cloudflare R2 and MinIO (s3:// and r2:// locations).
 s3 = ["tenbri-store/s3"]
+# Witness cosignatures (Experimental): receipt verify --witness.
+witness = ["tenbri-merkle/witness", "tenbri-writer/witness"]
 
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
@@ -39,7 +41,7 @@ tokio = { version = "1", features = ["macros", "rt", "time"] }
 [dev-dependencies]
 # Not published: only the test of pins recorded by the SDKs' stream creation uses it.
 tenbri-bindings = { path = "../../bindings/common" }
-tenbri-anchor = { workspace = true, features = ["test-tsa"] }
+tenbri-anchor = { workspace = true, features = ["test-tsa", "test-witness"] }
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 
 [lints]

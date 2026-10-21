@@ -51,6 +51,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Witness cosignatures (Experimental) are behind the `witness` features.
+      - run: cargo clippy -p tenbri-merkle -p tenbri-anchor -p tenbri-server -p tenbri-cli --all-targets --locked --features tenbri-merkle/witness,tenbri-anchor/witness,tenbri-anchor/test-witness,tenbri-server/witness,tenbri-cli/witness -- -D warnings
       - run: cargo doc --workspace --no-deps --locked
 
   test:
@@ -72,6 +74,7 @@ jobs:
         with:
           tool: cargo-nextest
       - run: cargo nextest run --workspace --locked
+      - run: cargo nextest run -p tenbri-merkle -p tenbri-anchor -p tenbri-server -p tenbri-cli --locked --features tenbri-merkle/witness,tenbri-anchor/witness,tenbri-anchor/test-witness,tenbri-server/witness,tenbri-cli/witness
       # nextest runs no doctests.
       - run: cargo test --workspace --doc --locked
 

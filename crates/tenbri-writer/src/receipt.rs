@@ -57,8 +57,8 @@ impl From<Broken> for ReceiptError {
 }
 
 /// A receipt for the entries `select` picks, read from `store` and checked against `pin` on the
-/// way. The checkpoint is the earliest one covering them that has an RFC 3161 timestamp, whose
-/// response goes in too; without one, the latest checkpoint. The key history is every key entry
+/// way. The checkpoint is the earliest one covering them that has an RFC 3161 timestamp or a
+/// witness cosignature, which go in too; without one, the latest checkpoint. The key history is every key entry
 /// up to the checkpoint.
 ///
 /// ponytail: reads the whole stream per receipt; tenbri-index's entry lookup when that is slow.
@@ -82,23 +82,39 @@ pub async fn receipt<S: Store>(
         .filter_map(|l| size_of(&l.key))
         .filter(|s| (need..=len).contains(s))
         .collect();
-    let anchored: BTreeSet<u64> = store
+    let mut anchored: BTreeSet<u64> = store
         .list("anchors/")
         .await?
         .iter()
         .filter_map(|l| anchored_size(&l.key))
         .collect();
+    // Cosigned by a witness counts as anchored: it is held outside the operator.
+    for &s in &covering {
+        if !store
+            .list(&checkpoint::cosignatures_dir(s))
+            .await?
+            .is_empty()
+        {
+            anchored.insert(s);
+        }
+    }
     let size = covering
         .iter()
         .find(|s| anchored.contains(s))
         .or(covering.last())
         .copied()
         .ok_or(ReceiptError::NotCheckpointed(need))?;
-    let note = store
+    let mut note = store
         .get(&checkpoint::key(size))
         .await?
         .ok_or(ReceiptError::NotCheckpointed(need))?
         .bytes;
+    // Witnesses' cosignatures, appended to the note's signature lines (c2sp.org/tlog-cosignature).
+    for l in store.list(&checkpoint::cosignatures_dir(size)).await? {
+        if let Some(o) = store.get(&l.key).await? {
+            note.extend(o.bytes);
+        }
+    }
     check(&note, Some(size), &r.chain, &r.hashes)?;
     let tokens: Vec<_> = store
         .get(&checkpoint::anchor_key(size))

@@ -4,9 +4,10 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use tenbri_core::sign::SigningKey;
 use tenbri_core::{Broken, Chain, Code, Error};
 use tenbri_keys::Key;
-use tenbri_merkle::{Hash, Note, checkpoint};
+use tenbri_merkle::{Checkpoint, Hash, Note, checkpoint};
 use tenbri_store::Store;
 
 use crate::{Commit, Hook, WriteError, Writer, signer};
@@ -25,6 +26,8 @@ pub struct Checkpoints {
     size: u64,
     since: Instant,
     local: Option<PathBuf>,
+    /// The stream's checkpoint key, which signs every checkpoint after the session key.
+    key: Option<SigningKey>,
 }
 
 impl Checkpoints {
@@ -38,7 +41,11 @@ impl Checkpoints {
     /// Signs and stores the checkpoint of the whole stream, and keeps it at `local`.
     async fn write<S: Store>(&mut self, store: &S, c: &Commit<'_>, key: &Key) -> io::Result<()> {
         let size = c.hashes.len() as u64;
-        let note = checkpoint::sign(&c.head.stream, c.hashes, &key.signing);
+        let cp = Checkpoint::new(&c.head.stream, c.hashes);
+        let note = match &self.key {
+            Some(k) => cp.sign_with(&[&key.signing, k]),
+            None => cp.sign(&key.signing),
+        };
         // Exists: another writer checkpointed the same entries.
         store.put_if_absent(&checkpoint::key(size), &note).await?;
         if let Some(p) = &self.local {
@@ -88,6 +95,41 @@ impl<S: Store> Writer<S, Checkpoints> {
     }
 }
 
+#[cfg(feature = "witness")]
+impl<S: Store> Writer<S, Checkpoints> {
+    /// Signs every checkpoint with `key`, the stream's checkpoint key, too: the one key witnesses
+    /// verify checkpoints with (spec/checkpoints.md, section 6). If the stream's checkpoint key
+    /// is another one, or none, first certifies `key` in the `ext` of a new session key's
+    /// certificate, signed by the stream key from the key store [`Writer::use_keys`] set.
+    pub async fn use_checkpoint_key(&mut self, key: SigningKey) -> Result<(), WriteError> {
+        use tenbri_merkle::witness;
+        let mut r = crate::Reader::new(&self.store, self.pin.as_deref());
+        let entries = r.poll().await?;
+        if witness::checkpoint_key(&entries, u64::MAX) != Some(key.verifying_key()) {
+            let keys = self.keys.clone().ok_or_else(|| {
+                WriteError::NoSession("no key store to certify the checkpoint key from".into())
+            })?;
+            let stream_key = self.load_stream_key(&keys)?;
+            let session = tenbri_keys::Key::new_session(
+                self.clock.now_ms(),
+                tenbri_keys::SESSION_LIFETIME_MS,
+            )?;
+            let backend = keys
+                .list()?
+                .into_iter()
+                .find(|m| m.id == stream_key.id)
+                .map_or(tenbri_keys::Backend::File, |m| m.backend);
+            keys.save(&session, backend)?;
+            let mut e = tenbri_keys::certify(&session);
+            e.ext = Some(witness::ext(&key.verifying_key()));
+            self.write(e, &stream_key, &session).await?;
+            self.session = Some(session);
+        }
+        self.hook.key = Some(key);
+        Ok(())
+    }
+}
+
 impl<S: Store, H> Writer<S, H> {
     /// The same writer, writing checkpoints from now on (see [`Checkpoints`]), keeping the latest
     /// at `local`, a file outside the store (the stream's key directory, say).
@@ -116,6 +158,7 @@ impl<S: Store, H> Writer<S, H> {
             size,
             since: Instant::now(),
             local,
+            key: None,
         }))
     }
 }

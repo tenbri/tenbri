@@ -1,0 +1,155 @@
+{
+  "checkpoint_key_ext": {
+    "checkpoint_key": "ed25519:fdfd30b7d73aaf513ba555204e56929a950f9aed7474491c760a91bc4794eba1"
+  },
+  "cosignatures": [
+    {
+      "name": "one-of-one",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4dxlpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n",
+      "result": {
+        "ok": [
+          {
+            "name": "witness.example/w1",
+            "time": 1792000000
+          }
+        ]
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "two-of-two",
+      "need": 2,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4dxlpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n— witness.example/w2 0HT/IQAAAABqz8AFByImLeYwCtZsbqU9+sX86L8ULoIpyDPV2hBm64+pPR0l5do7H7EuVvdoBEQXglHN7PypkGFhPDeRtv+rF4ikBg==\n",
+      "result": {
+        "ok": [
+          {
+            "name": "witness.example/w1",
+            "time": 1792000000
+          },
+          {
+            "name": "witness.example/w2",
+            "time": 1792000005
+          }
+        ]
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M",
+        "witness.example/w2+d074ff21+BD8YV08c3/V0BujwJrzbTyT4oXnltfATmqXuZ+WXvgJ5"
+      ]
+    },
+    {
+      "name": "one-of-two-pinned",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4dxlpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n",
+      "result": {
+        "ok": [
+          {
+            "name": "witness.example/w1",
+            "time": 1792000000
+          }
+        ]
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M",
+        "witness.example/w2+d074ff21+BD8YV08c3/V0BujwJrzbTyT4oXnltfATmqXuZ+WXvgJ5"
+      ]
+    },
+    {
+      "name": "missing-cosignature",
+      "need": 2,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4dxlpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n",
+      "result": {
+        "error": "unwitnessed"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M",
+        "witness.example/w2+d074ff21+BD8YV08c3/V0BujwJrzbTyT4oXnltfATmqXuZ+WXvgJ5"
+      ]
+    },
+    {
+      "name": "none-required",
+      "need": 0,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n",
+      "result": {
+        "ok": []
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "unpinned-witness",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w2 0HT/IQAAAABqz8AFByImLeYwCtZsbqU9+sX86L8ULoIpyDPV2hBm64+pPR0l5do7H7EuVvdoBEQXglHN7PypkGFhPDeRtv+rF4ikBg==\n",
+      "result": {
+        "error": "unwitnessed"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "changed-signature",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4d1lpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n",
+      "result": {
+        "error": "unwitnessed"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "changed-time",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAUqx7VTFP85oAGxjM6BVk5N7L9Ibc9gkb1dnxbykEpZqRhLVCzqV4kT+Q46mR09/8UZnjFIdBLJ5cb7/MAlsmBA==\n",
+      "result": {
+        "error": "unwitnessed"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    }
+  ],
+  "keys": [
+    {
+      "origin": "tnb1:170241c12e8724974ea3b10fe536b7d8",
+      "pub": "ed25519:fdfd30b7d73aaf513ba555204e56929a950f9aed7474491c760a91bc4794eba1",
+      "role": "checkpoint",
+      "vkey": "tnb1:170241c12e8724974ea3b10fe536b7d8+bb83202d+Af39MLfXOq9RO6VVIE5WkpqVD5rtdHRJHHYKkbxHlOuh"
+    },
+    {
+      "name": "witness.example/w1",
+      "pub": "ed25519:194f8b2de1a30394a11a516878efb2c22ac657089a3cf14fa79915c427089dcc",
+      "role": "witness",
+      "vkey": "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+    },
+    {
+      "name": "witness.example/w2",
+      "pub": "ed25519:3f18574f1cdff57406e8f026bcdb4f24f8a179e5b5f0139aa5ee67e597be0279",
+      "role": "witness",
+      "vkey": "witness.example/w2+d074ff21+BD8YV08c3/V0BujwJrzbTyT4oXnltfATmqXuZ+WXvgJ5"
+    }
+  ],
+  "requests": [
+    {
+      "body": "old 0\n\ntnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n",
+      "old": 0,
+      "proof": []
+    },
+    {
+      "body": "old 7\nBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=\nCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg=\nHGg3eW1cybozLW+31SZlxhZYMyiAhE4tboXjyOsLZjA=\nw+bFjEgC3mcM+DnWk+BP/HwOkcMuqBWG4Ny5QzqaLDA=\nwkoEj/itBTQw2PEwxDYTQm4zXSd5pSZCswA/icI1ujg=\n\ntnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n",
+      "old": 7,
+      "proof": [
+        "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg=",
+        "HGg3eW1cybozLW+31SZlxhZYMyiAhE4tboXjyOsLZjA=",
+        "w+bFjEgC3mcM+DnWk+BP/HwOkcMuqBWG4Ny5QzqaLDA=",
+        "wkoEj/itBTQw2PEwxDYTQm4zXSd5pSZCswA/icI1ujg="
+      ]
+    }
+  ]
+}

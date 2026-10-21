@@ -34,11 +34,12 @@ pub enum Code {
     BadReceipt,
     BadProof,
     BadTimestamp,
+    Unwitnessed,
 }
 
 impl Code {
     /// Every code, in the order of the spec's table.
-    pub const ALL: [Code; 31] = [
+    pub const ALL: [Code; 32] = [
         Code::Parse,
         Code::DuplicateKey,
         Code::NotInteger,
@@ -70,6 +71,7 @@ impl Code {
         Code::BadReceipt,
         Code::BadProof,
         Code::BadTimestamp,
+        Code::Unwitnessed,
     ];
 
     /// The code as the spec and the test vectors spell it, e.g. `bad_signature`.
@@ -106,6 +108,7 @@ impl Code {
             Code::BadReceipt => "bad_receipt",
             Code::BadProof => "bad_proof",
             Code::BadTimestamp => "bad_timestamp",
+            Code::Unwitnessed => "unwitnessed",
         }
     }
 }

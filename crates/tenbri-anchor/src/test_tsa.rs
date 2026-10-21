@@ -241,58 +241,13 @@ impl TestTsa {
     /// Serves RFC 3161 over HTTP on 127.0.0.1 (POST, `application/timestamp-query`), timed by the
     /// clock, until the process ends. Returns its URL.
     pub async fn serve(self) -> std::io::Result<String> {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let url = format!("http://{}/", listener.local_addr()?);
-        let tsa = std::sync::Arc::new(self);
-        tokio::spawn(async move {
-            while let Ok((mut s, _)) = listener.accept().await {
-                let tsa = tsa.clone();
-                tokio::spawn(async move {
-                    // ponytail: one request per connection, the headers in the first 64 KiB.
-                    let mut buf = vec![0; 65536];
-                    let mut n = 0;
-                    let body = loop {
-                        let Ok(r) = s.read(&mut buf[n..]).await else {
-                            return;
-                        };
-                        if r == 0 {
-                            return;
-                        }
-                        n += r;
-                        let text = String::from_utf8_lossy(&buf[..n]);
-                        let Some(end) = text.find("\r\n\r\n") else {
-                            continue;
-                        };
-                        let len = text[..end]
-                            .lines()
-                            .find_map(|l| {
-                                l.to_ascii_lowercase()
-                                    .strip_prefix("content-length:")
-                                    .and_then(|v| v.trim().parse::<usize>().ok())
-                            })
-                            .unwrap_or(0);
-                        if n >= end + 4 + len {
-                            break buf[end + 4..end + 4 + len].to_vec();
-                        }
-                    };
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .expect("after 1970")
-                        .as_secs();
-                    let (status, body) = match tsa.reply(&body, now) {
-                        Some(r) => ("200 OK", r),
-                        None => ("400 Bad Request", vec![]),
-                    };
-                    let head = format!(
-                        "HTTP/1.1 {status}\r\ncontent-type: application/timestamp-reply\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-                        body.len()
-                    );
-                    let _ = s.write_all(head.as_bytes()).await;
-                    let _ = s.write_all(&body).await;
-                });
+        crate::test_http::serve(move |body| {
+            let now = crate::test_http::now();
+            match self.reply(body, now) {
+                Some(r) => (200, "application/timestamp-reply", r),
+                None => (400, "application/timestamp-reply", vec![]),
             }
-        });
-        Ok(url)
+        })
+        .await
     }
 }

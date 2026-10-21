@@ -335,3 +335,4 @@ them offline, and RFC 3161 tokens give them independent time.
 | `missing_batch` | A batch HEAD needs is absent |
 | `bad_checkpoint`, `truncated`, `fork` | A checkpoint's failures ([checkpoints.md](checkpoints.md#5-error-codes)) |
 | `bad_receipt`, `bad_proof`, `bad_timestamp` | A receipt's failures ([receipts.md](receipts.md#6-error-codes)) |
+| `unwitnessed` | A checkpoint without the witness cosignatures a verifier requires (Experimental, [checkpoints.md](checkpoints.md#6-witnesses-experimental)) |

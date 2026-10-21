@@ -13,7 +13,8 @@ Checkpoints are [C2SP signed notes](https://c2sp.org/signed-note) in the
 read and verify them.
 
 The key words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119. The
-[test vectors](vectors/README.md) (`merkle.json`, `checkpoints.json`) are normative examples.
+[test vectors](vectors/README.md) (`merkle.json`, `checkpoints.json`, and `witness.json` for
+section 6) are normative examples.
 
 ## 1. The Merkle tree
 
@@ -155,11 +156,101 @@ Added to format v1's table (format-v1.md, section 10); `wrong_stream`, `unknown_
 | `truncated` | The stream has fewer entries than a checkpoint it is checked against covers |
 | `fork` | The stream's first entries do not have the root a checkpoint signed for them |
 
-## 6. Open points
+## 6. Witnesses (Experimental)
 
-- **Witnesses and rotating session keys.** A C2SP witness is configured with one verifier key per
-  log, but each session key signs for at most 24 hours. Before witnesses (Experimental), either
-  the stream key certifies a long-lived checkpoint key, or witnesses learn session keys from the
-  stream. Decided with the witness protocol.
+**Status: Experimental** (Cargo feature `witness`), and its data lives under `ext`: it may change
+before it is promoted to a format version. A witness (c2sp.org/tlog-witness) holds a log's latest
+checkpoint and cosigns a new one only if it is consistent with it. Checkpoints held by
+independent witnesses catch a rewrite, a truncation behind them, or a different history shown to
+someone else, even when the operator's host and all its keys are compromised.
+
+**The checkpoint key.** A C2SP witness is configured with one verifier key per log and keeps it for
+the life of the log, but session keys sign for at most 24 hours. So a witnessed stream has a
+checkpoint key: a long-lived Ed25519 key, certified by the stream key, that signs checkpoint notes
+and nothing else (no entry, attestation or HEAD).
+
+- **Certification.** A `key` entry, signed by the stream key as every key entry is, whose `ext`
+  holds `checkpoint_key`, the key as `ed25519:` and 64 lowercase hex digits:
+  `"ext": {"checkpoint_key": "ed25519:…"}`. The reference writer puts it on the `certify` of a new
+  session key. The checkpoint key in force at seq `n` is the one the last such entry at or before
+  `n` names; certifying another replaces it.
+- **Signing.** A witnessed stream's checkpoint carries two signature lines under the origin's name,
+  in this order: the session key's (section 2, which every format v1 verifier requires) and the
+  checkpoint key's, the same C2SP Ed25519 signature (type `0x01`). A verifier that does not know
+  the checkpoint key ignores its line (section 2, other signatures); one that read it from the key
+  history MUST verify it (`bad_checkpoint`).
+- **The verifier key** an operator registers with witnesses: the origin, the key ID in 8 lowercase
+  hex digits and the base64 of `0x01` and the public key, joined by `+`
+  (c2sp.org/signed-note): `tnb1:170241c12e8724974ea3b10fe536b7d8+bb83202d+Af39…`. tenbrid prints it
+  when it starts with `[witness]`.
+
+Why this and not the alternatives:
+
+- **Not the stream key.** It would have to be online to sign every checkpoint, and rotating it
+  (format v1, section 5) would change the log's key at every witness, which C2SP witnesses never do.
+- **Not session keys that witnesses learn from the stream.** No C2SP witness reads Tenbri key
+  entries; a witness that did would be Tenbri-specific, and public witnesses would not run it.
+- **Why `ext`.** Format v1's key roles are closed (`stream`, `session`): a `role: checkpoint` is a
+  field change, which only a new format version may make (CONTRIBUTING.md, "Format changes"). The
+  role replaces `ext.checkpoint_key` when witnesses leave Experimental.
+
+A thief holding the checkpoint key can sign checkpoints but no entries, and witnesses still refuse
+one that contradicts what they cosigned. A thief holding the stream key can certify another
+checkpoint key, but witnesses keep verifying with the one registered with them.
+
+**Submitting.** The writer sends a checkpoint to each witness as c2sp.org/tlog-witness says:
+`POST <prefix>/add-checkpoint` with the body `old <size>`, the consistency proof (section 1) from
+that size to the checkpoint's, one base64 hash per line, an empty line, and the signed note, each
+line ending in a line feed. `old` is the size the witness last cosigned for this stream (0 for
+none). A `409` answer carries the witness's size (`text/x.tlog.size`): the writer sends again from
+it, unless it is above the checkpoint's size, which means a fork or a truncated stream. A `422`
+means the checkpoint is inconsistent with one the witness cosigned: a fork, reported and never
+retried. A `200` answer holds signature lines; the writer keeps the one by the witness's pinned
+key that verifies. tenbrid's `[witness]` sends the latest checkpoint every 5 minutes by default.
+
+**Storage.** A cosignature line is stored next to its checkpoint as
+`cosignatures/` + the size zero-padded to 12 digits + `/` + the witness's key ID in hex + `.sig`:
+`cosignatures/000000002000/1a2b3c4d.sig`, with put-if-absent. A receipt (receipts.md) carries the
+cosignatures as extra signature lines of its `checkpoint` note, so the receipt format does not
+change; its issuer picks a cosigned checkpoint as it picks a timestamped one.
+
+**Cosignatures.** A witness's cosignature is c2sp.org/tlog-cosignature's Ed25519 `cosignature/v1`
+(type `0x04`):
+
+```
+message   = "cosignature/v1\n" || "time " || T || "\n" || note text
+key ID    = SHA-256(witness name || 0x0A || 0x04 || 32-byte Ed25519 public key)[0:4]
+signature = key ID || T as 8 bytes, big-endian || Ed25519-Sign(witness key, message)
+```
+
+`T` is the witness's time in seconds since the Unix epoch, in decimal in the message. The line is
+`—`, a space, the witness's name, a space and the base64 of the signature. A witness's verifier key
+is its name, its key ID in hex and the base64 of `0x04` and its public key, joined by `+`.
+
+**Verifying.** A verifier that wants independent witnessing pins witnesses by their verifier keys
+and a number `N`. After the checkpoint's own checks (section 4, or receipts.md, section 3):
+
+| Check | Fails with |
+| --- | --- |
+| A signature line by the checkpoint key in force at `size` verifies, if the note has one | `bad_checkpoint` |
+| Every cosignature line whose name and key ID match a pinned witness verifies (strictly) | `unwitnessed` |
+| At least `N` pinned witnesses cosigned | `unwitnessed` |
+
+`T` is the witness's claim, signed by it; a verifier shows it as the witness's time, never as the
+writer's or a TSA's.
+
+**Detected**, with `N` honest witnesses among those pinned: a checkpoint, and so a receipt, for a
+history other than the one those witnesses saw: a rewrite, a truncation behind their last
+cosignature, or a split view. **Not detected**: a stream never sent to them, `N` witnesses that
+collude with the operator, and entries after the last cosigned checkpoint.
+
+| Code | Meaning |
+| --- | --- |
+| `unwitnessed` | A checkpoint without the cosignatures from pinned witnesses a verifier requires, or with one that does not verify (Experimental) |
+
+## 7. Open points
+
+- **Witnesses and rotating session keys.** Decided: a long-lived checkpoint key certified by the
+  stream key (section 6).
 - **Timestamps.** C2SP's timestamped cosignature (type `0x04`) would give checkpoints a signed time;
   format v1 uses the plain Ed25519 log signature, which has none.

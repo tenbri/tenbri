@@ -16,6 +16,10 @@ workspace = true
 client = ["dep:getrandom", "dep:reqwest"]
 # A timestamp authority in memory, for tests and the receipt test vectors: never for production.
 test-tsa = ["x509-cert/builder", "p256/pem", "dep:tokio"]
+# Witness cosignatures (Experimental): submitting checkpoints to C2SP witnesses over HTTP.
+witness = ["client", "tenbri-merkle/witness"]
+# A C2SP witness in memory, for tests: never for production.
+test-witness = ["tenbri-merkle/witness", "dep:tokio"]
 
 [dependencies]
 cms = "0.2.3"

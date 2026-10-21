@@ -74,6 +74,9 @@ pub struct Verified {
     pub entries: Vec<Entry>,
     /// The RFC 3161 timestamp responses, as DER, not yet checked.
     pub rfc3161: Vec<Vec<u8>>,
+    /// The checkpoint note with all its signature lines, witnesses' cosignatures among them, not
+    /// yet checked but the stream's.
+    pub note: Note,
 }
 
 impl Verified {
@@ -176,6 +179,7 @@ pub fn verify(bytes: &[u8], pin: &str) -> Result<Verified, Error> {
         checkpoint: cp,
         entries,
         rfc3161,
+        note,
     })
 }
 
