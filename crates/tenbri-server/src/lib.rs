@@ -38,8 +38,7 @@ use std::time::Duration;
 
 use futures_util::{Stream, StreamExt, stream};
 use tenbri_core::{
-    Code, Durability, Entry, Head, Kind, Phase, Principal, Role, Source, Trace, canon, encoding,
-    sign,
+    Code, Durability, Entry, Head, Kind, Phase, Principal, Source, Trace, canon, encoding, sign,
 };
 use tenbri_keys::KeyStore;
 use tenbri_merkle::checkpoint;
@@ -213,11 +212,25 @@ impl Daemon {
             deadline: Duration::from_millis(config.deadline_ms),
             ..LaneConfig::default()
         };
+        // One token for every stream: a PKCS#11 module is initialized once per process.
+        #[cfg(feature = "pkcs11")]
+        let token = config.pkcs11.as_ref().map(|p| {
+            tenbri_keys::pkcs11::Token::new(p.module.clone(), p.token.clone(), p.pin.clone())
+        });
         for (name, sc) in &config.streams {
             let store = stores.remove(name).ok_or("a stream without a store")?;
-            let lane = Lane::open(name, sc, store, &keys, &index_root, lane_config)
-                .await
-                .map_err(|e| format!("stream {name} ({}): {e}", sc.path))?;
+            let lane = Lane::open(
+                name,
+                sc,
+                store,
+                &keys,
+                #[cfg(feature = "pkcs11")]
+                token.clone(),
+                &index_root,
+                lane_config,
+            )
+            .await
+            .map_err(|e| format!("stream {name} ({}): {e}", sc.path))?;
             lanes.insert(name.clone(), Arc::new(lane));
         }
         let tokens = config
@@ -608,6 +621,7 @@ impl Lane {
         sc: &StreamConfig,
         store: AnyStore,
         keys: &Path,
+        #[cfg(feature = "pkcs11")] token: Option<Arc<tenbri_keys::pkcs11::Token>>,
         index_root: &Path,
         config: LaneConfig,
     ) -> Result<Lane, String> {
@@ -623,16 +637,18 @@ impl Lane {
             KeyStore::open(keys, Path::new(&sc.path), &head.stream)
         }
         .map_err(|e| e.to_string())?;
+        #[cfg(feature = "pkcs11")]
+        #[cfg(feature = "pkcs11")]
+        let (ks, has_token) = match token {
+            Some(t) => (ks.with_token(t), true),
+            None => (ks, false),
+        };
         let pin = match &sc.key {
             Some(k) => pin(k)?,
             // As `tenbri append` does: the genesis key as this machine holds it.
             None => ks
-                .list()
+                .genesis()
                 .map_err(|e| e.to_string())?
-                .iter()
-                .filter(|m| m.role == Role::Stream)
-                .filter_map(|m| sign::decode_key(&m.public).ok())
-                .find(|k| sign::stream_id(k) == head.stream)
                 .map(|k| sign::fingerprint(&k))
                 .ok_or_else(|| {
                     format!(
@@ -648,6 +664,24 @@ impl Lane {
             .with_checkpoints(Some(ks.dir().join(CHECKPOINT_FILE)))
             .await
             .map_err(|e| e.to_string())?;
+        // A stream key in a token: the token is configured and answers now, or tenbrid does not
+        // start, rather than failing when the session key next needs renewing.
+        #[cfg(feature = "pkcs11")]
+        if let Some(current) = writer.chain().stream_key() {
+            let kept = ks.list().map_err(|e| e.to_string())?;
+            if kept
+                .iter()
+                .any(|m| m.id == current && m.backend == tenbri_keys::Backend::Pkcs11)
+            {
+                if !has_token {
+                    return Err(format!(
+                        "the stream key {current} is in a PKCS#11 token: configure [pkcs11]"
+                    ));
+                }
+                ks.load(current)
+                    .map_err(|e| format!("the stream key {current}: {e}"))?;
+            }
+        }
         let writable = match writer.use_keys(ks.clone()).await {
             Ok(()) => true,
             Err(e) => {

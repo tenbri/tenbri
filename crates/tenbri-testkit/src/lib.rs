@@ -120,23 +120,23 @@ impl Clock for FixedClock {
 
 /// The test kit's stream key: always the same.
 pub fn stream_key() -> Key {
-    Key {
-        id: "stream:testkit".into(),
-        role: Role::Stream,
-        not_after: None,
-        signing: SigningKey::from_bytes(&[1; 32]),
-    }
+    Key::local(
+        "stream:testkit".into(),
+        Role::Stream,
+        None,
+        SigningKey::from_bytes(&[1; 32]),
+    )
 }
 
 /// The test kit's session key: always the same, valid for 24 hours from [`START_MS`], as a real
 /// session key is.
 pub fn session_key() -> Key {
-    Key {
-        id: "sess:testkit".into(),
-        role: Role::Session,
-        not_after: Some(encoding::format_ts(START_MS + SESSION_LIFETIME_MS)),
-        signing: SigningKey::from_bytes(&[2; 32]),
-    }
+    Key::local(
+        "sess:testkit".into(),
+        Role::Session,
+        Some(encoding::format_ts(START_MS + SESSION_LIFETIME_MS)),
+        SigningKey::from_bytes(&[2; 32]),
+    )
 }
 
 /// An input `ref` at `version`, for a test entry. Its digest is a placeholder (the SHA-256 of
