@@ -280,7 +280,7 @@ impl<S: Store> Writer<S> {
             return Err(WriteError::Exists);
         }
         let mut e = tenbri_keys::certify(stream_key);
-        e.stream = sign::stream_id(&stream_key.signing.verifying_key());
+        e.stream = sign::stream_id(&stream_key.verifying_key());
         e.seq = 1;
         stamp(&mut e, &*clock)?;
         let mut w = Writer {
@@ -307,7 +307,7 @@ impl<S: Store> Writer<S> {
             store,
         };
         let mut e = fill(e, &w.chain, &stream_key.id);
-        let line = sign::sign_entry(&mut e, &stream_key.signing).map_err(WriteError::Rejected)?;
+        let line = sign_entry(&mut e, stream_key)?.map_err(WriteError::Rejected)?;
         let checked = w.chain.check(&line).map_err(WriteError::Rejected)?;
         if w.store
             .put_if_absent(&batch_key(1), &with_lf(&line))
@@ -316,7 +316,7 @@ impl<S: Store> Writer<S> {
         {
             return Err(WriteError::Exists);
         }
-        let head = signed_head(&w.head, 1, &checked.hash, 1, stream_key);
+        let head = signed_head(&w.head, 1, &checked.hash, 1, stream_key)?;
         match w.store.compare_and_swap("HEAD", None, &head.1).await? {
             Swap::Swapped(v) => (w.head, w.version) = (head.0, v),
             Swap::Mismatch => return Err(WriteError::Exists),
@@ -477,7 +477,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
         let backend = metas
             .iter()
             .find(|m| m.id == current)
-            .map_or(Backend::File, |m| m.backend);
+            .map_or(Backend::File, |m| m.backend.for_sessions());
         keys.save(&session, backend)?;
         self.certify_session(&stream_key, session).await?;
         Ok(())
@@ -488,7 +488,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
         let info = self.chain.key(&key.id).ok_or_else(|| {
             WriteError::NoSession(format!("{} is not certified in this stream", key.id))
         })?;
-        if info.role != tenbri_core::Role::Session || info.public != key.signing.verifying_key() {
+        if info.role != tenbri_core::Role::Session || info.public != key.verifying_key() {
             return Err(WriteError::NoSession(format!(
                 "{} is not this stream's session key",
                 key.id
@@ -720,10 +720,20 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
             let first = self.chain.seq() + 1;
             self.stale = true;
             let (mut bytes, mut built, mut hashes, mut keep) = (vec![], vec![], vec![], vec![]);
-            for (i, draft) in pending.drain(..) {
+            let mut drafts = std::mem::take(pending).into_iter();
+            while let Some((i, draft)) = drafts.next() {
                 let mut e = fill(draft.clone(), &self.chain, &key.id);
-                let checked = sign::sign_entry(&mut e, &key.signing)
-                    .and_then(|line| Ok((self.chain.check(&line)?, line)));
+                let checked = match sign_entry(&mut e, key) {
+                    Ok(r) => r.and_then(|line| Ok((self.chain.check(&line)?, line))),
+                    // The key could not sign (a token out of reach): the whole batch fails, and
+                    // `chain`, stale, is read again before the next write.
+                    Err(err) => {
+                        keep.push((i, draft));
+                        keep.extend(drafts);
+                        *pending = keep;
+                        return Err(err.into());
+                    }
+                };
                 match checked {
                     Err(err) => results[i] = Some(Err(WriteError::Rejected(err))),
                     Ok((c, line)) => {
@@ -768,7 +778,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
             }
             // 4. Advance HEAD.
             let hash = hashes.last().expect("a batch has entries");
-            let (head, head_bytes) = signed_head(&self.head, last, hash, first, head_key);
+            let (head, head_bytes) = signed_head(&self.head, last, hash, first, head_key)?;
             match self
                 .store
                 .compare_and_swap("HEAD", Some(&self.version), &head_bytes)
@@ -818,7 +828,7 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
         }
         let last = self.chain.seq();
         let hash = hashes.last().expect("a batch has entries");
-        let (head, head_bytes) = signed_head(&self.head, last, hash, seq, head_key);
+        let (head, head_bytes) = signed_head(&self.head, last, hash, seq, head_key)?;
         match self
             .store
             .compare_and_swap("HEAD", Some(&self.version), &head_bytes)
@@ -848,9 +858,7 @@ fn signer<'a>(chain: &Chain, session: Option<&'a Key>, now: i64) -> Option<&'a K
     session.filter(|k| {
         k.valid_at(now)
             && chain.key(&k.id).is_some_and(|i| {
-                i.role == Role::Session
-                    && i.revoked_from.is_none()
-                    && i.public == k.signing.verifying_key()
+                i.role == Role::Session && i.revoked_from.is_none() && i.public == k.verifying_key()
             })
     })
 }
@@ -918,7 +926,23 @@ fn with_lf(line: &[u8]) -> Vec<u8> {
     b
 }
 
-fn signed_head(prev: &Head, seq: u64, hash: &str, batch: u64, key: &Key) -> (Head, Vec<u8>) {
+/// Signs `e` with `key`: `Err` if the key could not sign (a token out of reach), `Ok(Err)` if the
+/// entry breaks a rule.
+fn sign_entry(e: &mut Entry, key: &Key) -> io::Result<Result<Vec<u8>, Error>> {
+    let msg = match sign::entry_message(e) {
+        Ok(m) => m,
+        Err(err) => return Ok(Err(err)),
+    };
+    Ok(sign::seal_entry(e, &key.sign(&msg)?))
+}
+
+fn signed_head(
+    prev: &Head,
+    seq: u64,
+    hash: &str,
+    batch: u64,
+    key: &Key,
+) -> io::Result<(Head, Vec<u8>)> {
     let mut head = Head {
         v: 1,
         stream: prev.stream.clone(),
@@ -929,8 +953,9 @@ fn signed_head(prev: &Head, seq: u64, hash: &str, batch: u64, key: &Key) -> (Hea
         signer: key.id.clone(),
         sig: String::new(),
     };
-    let bytes = sign::sign_head(&mut head, &key.signing);
-    (head, bytes)
+    let sig = key.sign(&sign::head_message(&head))?;
+    let bytes = sign::seal_head(&mut head, &sig);
+    Ok((head, bytes))
 }
 
 /// Removes batches that do not chain from HEAD, temporary files and canary objects, if older than

@@ -6,6 +6,8 @@
 # - semver: cargo-semver-checks against the last release on crates.io;
 # - storage: the store, writer and CLI against MinIO, the object store anyone can run, as
 #   Artbucket's CI runs Postgres;
+# - hsm: the Experimental PKCS#11 stream key (the pkcs11 feature) against SoftHSM, linted and
+#   tested through tenbri-keys, the writer, the CLI and tenbrid;
 # - python, node, wasm: each binding builds as release.yml builds it and passes its own tests
 #   (pytest and mypy; tsc and node:test; wasm-pack test and the built package in Node), the
 #   vectors among them; the WASM verifier stays within its size budget;
@@ -169,6 +171,35 @@ jobs:
           curl -sf --aws-sigv4 "aws:amz:$TENBRI_TEST_S3_REGION:s3" \
             --user "$TENBRI_TEST_S3_ACCESS_KEY_ID:$TENBRI_TEST_S3_SECRET_ACCESS_KEY" \
             "$TENBRI_TEST_S3_ENDPOINT/$TENBRI_TEST_S3_BUCKET?list-type=2&prefix=tenbri-tests/&max-keys=1" | grep -q '<Key>'
+
+  hsm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOFTHSM2_CONF: ${{ github.workspace }}/softhsm2.conf
+      TENBRI_TEST_PKCS11_MODULE: /usr/lib/softhsm/libsofthsm2.so
+      TENBRI_TEST_PKCS11_TOKEN: tenbri
+      TENBRI_TEST_PKCS11_PIN: "1234"
+    steps:
+      - uses: actions/checkout@v7
+      - name: SoftHSM, with one token
+        run: |
+          sudo apt-get update && sudo apt-get install -y softhsm2
+          mkdir -p "$RUNNER_TEMP/tokens"
+          echo "directories.tokendir = $RUNNER_TEMP/tokens" > "$SOFTHSM2_CONF"
+          softhsm2-util --init-token --free --label tenbri --so-pin 5678 --pin "$TENBRI_TEST_PKCS11_PIN"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: cargo clippy -p tenbri-keys -p tenbri-cli -p tenbri-server --features tenbri-keys/pkcs11,tenbri-cli/pkcs11,tenbri-server/pkcs11 --all-targets --locked -- -D warnings
+      - shell: bash # pipefail: a failing test fails the step through tee
+        run: cargo nextest run -p tenbri-keys -p tenbri-writer -p tenbri-cli -p tenbri-server --features tenbri-keys/pkcs11,tenbri-cli/pkcs11,tenbri-server/pkcs11 --locked --no-capture 2>&1 | tee "$RUNNER_TEMP/hsm.log"
+      - name: The suite ran on SoftHSM
+        run: "! grep -q 'TENBRI_TEST_PKCS11_\\* not set' \"$RUNNER_TEMP/hsm.log\""
 
   python:
     runs-on: ubuntu-latest
