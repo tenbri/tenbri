@@ -71,6 +71,8 @@ pub struct Token {
     pub principal: Principal,
     /// Stream names it may use; `None`: all.
     pub streams: Option<Vec<String>>,
+    /// May use [`Daemon::digest`].
+    pub digest: bool,
 }
 
 /// An entry as stored, with its canonical JSON and its entry hash.
@@ -151,6 +153,8 @@ struct Lane {
     query_index: std::sync::Mutex<Box<dyn tenbri_index::Backend>>,
     tx: broadcast::Sender<Arc<Stored>>,
     writable: AtomicBool,
+    /// The stream's key store, beside which its data keys live (spec/privacy.md).
+    keys: KeyStore,
     /// Per witness vkey, the size it last cosigned, as far as this process knows (0 at start: a
     /// 409 tells the real one).
     #[cfg(feature = "witness")]
@@ -249,6 +253,7 @@ impl Daemon {
                 let token = Token {
                     principal: t.principal.clone(),
                     streams: t.streams.clone(),
+                    digest: t.digest,
                 };
                 (t.sha256.clone(), token)
             })
@@ -603,6 +608,50 @@ impl Daemon {
         })
     }
 
+    /// The keyed digest of an input, `hmac-sha256:<hex>`, under the newest data key of `subject`,
+    /// for a caller that holds a token and no keys (spec/privacy.md, section 3). Only for tokens
+    /// configured with `digest = true`: the route confirms guesses against the log's digests. The
+    /// tenant's key (no subject) is made on first use; a subject's never is, so a caller cannot
+    /// fill the key store with subjects: one without a key is TENBRI_NOT_FOUND.
+    pub async fn digest(
+        &self,
+        token: &Token,
+        stream: &str,
+        subject: Option<String>,
+        content: Vec<u8>,
+    ) -> Result<String, ApiError> {
+        let keys = self.lane(token, stream)?.keys.clone();
+        if !token.digest {
+            return Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "this token may not ask for digests (digest = true in its [[tokens]] entry)",
+            ));
+        }
+        tokio::task::spawn_blocking(move || {
+            let data = tenbri_crypt::DataKeys::open(&keys).map_err(tenbri_crypt::Error::Io)?;
+            match subject.as_deref() {
+                None => data.digest(None, &content),
+                s => data.digest_held(s, &content),
+            }
+        })
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::Internal, e.to_string()))?
+        .map_err(|e| {
+            use std::io::ErrorKind as K;
+            let code = match &e {
+                tenbri_crypt::Error::NoKey(_) => ErrorCode::NotFound,
+                tenbri_crypt::Error::Io(e) => match e.kind() {
+                    K::InvalidInput => ErrorCode::InvalidRequest,
+                    // A corrupt or unreadable key file: retrying will not help.
+                    K::InvalidData | K::PermissionDenied => ErrorCode::Internal,
+                    _ => ErrorCode::StoreUnavailable,
+                },
+                _ => ErrorCode::Internal,
+            };
+            ApiError::new(code, e.to_string())
+        })
+    }
+
     /// Stops readiness and ends every tail.
     pub fn begin_shutdown(&self) {
         self.shutdown.send_replace(true);
@@ -689,7 +738,7 @@ impl Lane {
                     .map_err(|e| format!("the stream key {current}: {e}"))?;
             }
         }
-        let writable = match writer.use_keys(ks).await {
+        let writable = match writer.use_keys(ks.clone()).await {
             Ok(()) => true,
             Err(e) => {
                 eprintln!("tenbrid: stream {name}: not writable: {e}");
@@ -727,6 +776,7 @@ impl Lane {
             query_index: std::sync::Mutex::new(query_index),
             tx: broadcast::channel(TAIL_BUFFER).0,
             writable: AtomicBool::new(writable),
+            keys: ks,
             #[cfg(feature = "witness")]
             witnessed: std::sync::Mutex::default(),
         };

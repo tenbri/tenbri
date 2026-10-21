@@ -3425,6 +3425,7 @@ dependencies = [
  "tenbri-core",
  "tenbri-crypt",
  "tenbri-keys",
+ "tenbri-merkle",
  "tenbri-schema",
  "tenbri-server",
  "tenbri-store",
@@ -3565,10 +3566,12 @@ dependencies = [
 name = "tenbri-proxy"
 version = "0.1.0-beta.5"
 dependencies = [
+ "serde",
  "serde_json",
  "tenbri-bindings",
  "tenbri-core",
  "tenbri-keys",
+ "tenbri-server",
  "tenbri-store",
  "tenbri-writer",
  "tokio",
@@ -3610,6 +3613,7 @@ dependencies = [
  "sha2 0.11.0",
  "tenbri-anchor",
  "tenbri-core",
+ "tenbri-crypt",
  "tenbri-index",
  "tenbri-keys",
  "tenbri-merkle",

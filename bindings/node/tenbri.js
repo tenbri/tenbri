@@ -153,6 +153,12 @@ class Tenbri {
     return 'hmac-sha256:' + createHmac('sha256', this.#digestKey).update(content).digest('hex')
   }
 
+  /** {@link digest} without blocking the event loop: through tenbrid, prefer it. */
+  async digestAsync(content, { subject } = {}) {
+    if (this.#digestKey !== undefined) return this.digest(content, { subject })
+    return call(this.#s.digestAsync(subject ?? null, Buffer.from(content)))
+  }
+
   async append(entry) {
     return JSON.parse(await call(this.#s.append(JSON.stringify(draft(entry)))))
   }

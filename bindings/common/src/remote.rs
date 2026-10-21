@@ -23,6 +23,13 @@ pub const SCHEMA_VIOLATION: &str = "TENBRI_SCHEMA_VIOLATION";
 /// tenbrid failed on a bug of its own.
 pub const INTERNAL: &str = "TENBRI_INTERNAL";
 
+/// How long connecting to tenbrid may take.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// How long one request may take in all, so a hung tenbrid cannot hold a caller (Node's
+/// synchronous `digest`, a Python thread) forever. Appends wait at most tenbrid's `deadline_ms`
+/// for its queue; a receipt may seal a checkpoint first.
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Whether `location` names a tenbrid rather than a stream's storage.
 pub(crate) fn is_remote(location: &str) -> bool {
     location.starts_with("https://") || location.starts_with("http://")
@@ -74,8 +81,13 @@ impl Remote {
             .expect("an http URL has a path")
             .clear()
             .extend(["v1", "streams", &stream]);
+        let http = Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(TIMEOUT)
+            .build()
+            .map_err(|e| Error::new(INTERNAL, format!("HTTP client: {e}")))?;
         let mut r = Remote {
-            http: Client::new(),
+            http,
             base,
             token,
             id: String::new(),
@@ -133,6 +145,22 @@ impl Remote {
             "checkpoint": null,
         })
         .to_string())
+    }
+
+    /// The keyed digest of an input under tenbrid's data key for `subject`.
+    pub(crate) async fn digest(
+        &self,
+        subject: Option<&str>,
+        content: &[u8],
+    ) -> Result<String, Error> {
+        let body = serde_json::json!({
+            "subject": subject,
+            "content": tenbri_merkle::checkpoint::base64(content),
+        });
+        let out: Digest = self
+            .call(Method::POST, "digest", Some(body.to_string().into_bytes()))
+            .await?;
+        Ok(out.digest)
     }
 
     /// The entries matching `f`, as [`crate::Stream::query`] returns them, page by page.
@@ -283,6 +311,11 @@ struct Batch {
 #[derive(Deserialize)]
 struct Appended {
     entry: Box<serde_json::value::RawValue>,
+}
+
+#[derive(Deserialize)]
+struct Digest {
+    digest: String,
 }
 
 #[derive(Deserialize)]

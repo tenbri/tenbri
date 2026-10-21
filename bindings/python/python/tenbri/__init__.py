@@ -257,7 +257,8 @@ class _Log:
         """The keyed digest of an input, ``hmac-sha256:<hex>``: a guessed value cannot be
         confirmed from the log without the key. The key is the ``digest_key`` given at open, else
         ``subject``'s data key (the tenant's without one) from the local key store beside the
-        stream's keys, made on first use; erasing that key leaves the digest unconfirmable."""
+        stream's keys, or tenbrid's, made on first use; erasing that key leaves the digest
+        unconfirmable."""
         data = content.encode() if isinstance(content, str) else content
         if self._digest_key is None:
             return self._s.digest(subject, data)
@@ -457,8 +458,8 @@ class Tenbri(_Log):
         ``r2://bucket/prefix`` (credentials from ``AWS_*``; ``CLOUDFLARE_ACCOUNT_ID`` for R2), or
         a tenbrid, ``https://host[:port]/<stream>`` (``http://`` on loopback only), with the bearer
         token in ``$TENBRI_TOKEN``: tenbrid holds the keys and signs, so the agent holds none.
-        Through tenbrid, ``keys`` and ``create`` are not used, and input digests need
-        ``digest_key``.
+        Through tenbrid, ``keys`` and ``create`` are not used, and tenbrid keys input digests if
+        the token has ``digest = true`` (a subject's data key must exist there).
 
         ``keys`` is the keys directory (default ``$TENBRI_KEYS``, else ``~/.config/tenbri/keys``),
         never inside the stream; without the stream's keys there, the stream is read-only.

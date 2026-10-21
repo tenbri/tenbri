@@ -14,7 +14,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodFilter, on};
 use futures_util::{Stream, StreamExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use tenbri_core::{Trace, canon};
 use tokio::net::TcpListener;
@@ -62,6 +62,8 @@ TENBRI_INTERNAL (500). A 503 carries Retry-After.",
         AsOfBody,
         VerifyBody,
         StatusBody,
+        DigestRequest,
+        DigestBody,
     ))
 )]
 struct ApiDoc;
@@ -89,6 +91,7 @@ fn api() -> (axum::Router<Arc<Daemon>>, utoipa::openapi::OpenApi) {
     a = route::<__path_get_receipt, _, _>(a, get_receipt);
     a = route::<__path_tail_entries, _, _>(a, tail_entries);
     a = route::<__path_verify_stream, _, _>(a, verify_stream);
+    a = route::<__path_digest_input, _, _>(a, digest_input);
     a = route::<__path_list_schemas, _, _>(a, list_schemas);
     a = route::<__path_health, _, _>(a, health);
     a = route::<__path_ready, _, _>(a, ready);
@@ -260,6 +263,22 @@ struct BrokenBody {
     /// The format v1 error code (bad_signature, ...).
     code: String,
     message: String,
+}
+
+/// An input to digest.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct DigestRequest {
+    /// The subject handle whose data key digests it; the tenant's key without one. Never empty.
+    subject: Option<String>,
+    /// The input's bytes, standard base64 with padding.
+    content: String,
+}
+
+#[derive(Serialize, ToSchema)]
+struct DigestBody {
+    /// `hmac-sha256:<hex>`, for the input's `digest`.
+    digest: String,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -664,6 +683,37 @@ async fn verify_stream(
             message: b.error.detail,
         }),
     }))
+}
+
+/// The keyed digest of an input under the stream's newest data key for `subject` (spec/privacy.md,
+/// section 3), for a caller that holds a token and no keys. Only tokens configured with
+/// `digest = true` may ask (TENBRI_FORBIDDEN otherwise): the answer confirms a guessed input
+/// against the log's digests. The tenant's key (no `subject`) is made on first use; a subject's
+/// never is here, so a subject without a data key is TENBRI_NOT_FOUND. `subject` is never empty
+/// (TENBRI_INVALID_REQUEST); over gRPC an empty `subject` means the tenant's key.
+#[utoipa::path(
+    post,
+    path = "/v1/streams/{stream}/digest",
+    params(("stream" = String, Path, description = "The stream's name or id")),
+    request_body(content = DigestRequest),
+    responses(
+        (status = 200, description = "The digest", body = DigestBody),
+        (status = "default", description = "An error", body = ErrorBody),
+    ),
+    security(("token" = [])),
+)]
+async fn digest_input(
+    State(d): State<Arc<Daemon>>,
+    Caller(t): Caller,
+    Path(stream): Path<String>,
+    body: Bytes,
+) -> Result<Json<DigestBody>, ApiError> {
+    let bad = |m: String| ApiError::new(ErrorCode::InvalidRequest, m);
+    let r: DigestRequest = serde_json::from_slice(&body).map_err(|e| bad(e.to_string()))?;
+    let content = tenbri_merkle::checkpoint::unbase64(&r.content)
+        .ok_or_else(|| bad("content: not canonical base64 with padding".into()))?;
+    let digest = d.digest(&t, &stream, r.subject, content).await?;
+    Ok(Json(DigestBody { digest }))
 }
 
 /// The action schemas declared in tenbri.toml.

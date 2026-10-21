@@ -17,6 +17,8 @@ serde_json = { version = "1", features = ["raw_value"] }
 tenbri-core.workspace = true
 tenbri-crypt.workspace = true
 tenbri-keys.workspace = true
+# checkpoint::base64, for the digest route's content.
+tenbri-merkle.workspace = true
 tenbri-schema.workspace = true
 tenbri-store = { workspace = true, features = ["s3"] }
 tenbri-writer.workspace = true

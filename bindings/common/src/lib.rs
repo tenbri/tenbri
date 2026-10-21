@@ -192,16 +192,13 @@ impl Stream {
     }
 
     /// The keyed digest of an input, `hmac-sha256:<hex>`, under the data key of `subject` (the
-    /// tenant's without one) from the local key store beside the stream's keys, made on first use:
-    /// erasing the subject's key leaves the digest unconfirmable (spec/privacy.md).
-    pub fn digest(&self, subject: Option<&str>, content: &[u8]) -> Result<String, Error> {
+    /// tenant's without one), made on first use: from the local key store beside the stream's
+    /// keys, or through tenbrid, which holds them. Erasing the subject's key leaves the digest
+    /// unconfirmable (spec/privacy.md).
+    pub async fn digest(&self, subject: Option<&str>, content: &[u8]) -> Result<String, Error> {
         match &self.0 {
             Inner::Local(l) => l.digest(subject, content),
-            // ponytail: tenbrid has no digest route yet; callers pass their own digest key.
-            Inner::Remote(_) => Err(Error::new(
-                NO_SESSION_KEY,
-                "the data keys stay with tenbrid, which does not digest yet: pass a digest key",
-            )),
+            Inner::Remote(r) => r.digest(subject, content).await,
         }
     }
 

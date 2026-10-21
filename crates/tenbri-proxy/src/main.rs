@@ -6,7 +6,9 @@
 //!
 //! `--stream` defaults to `$TENBRI_STREAM` and `--agent` to `$TENBRI_AGENT`. Point the stream at a
 //! tenbrid (`https://host/<stream>`, token in `$TENBRI_TOKEN`) so neither the agent nor the proxy
-//! holds a signing key.
+//! holds a signing key. That tenbrid must serve the digest route (`POST /v1/streams/{stream}/digest`)
+//! and its token have `digest = true`: the proxy pins every call's arguments by keyed digest, so
+//! against an older tenbrid, or without the flag, it refuses every call that has arguments.
 
 use std::process::{ExitCode, Stdio};
 use std::sync::Arc;
