@@ -19,6 +19,9 @@
 //! - Every request but health checks needs a bearer token, bound to one principal.
 //! - With `[anchor]` configured, the latest checkpoint of every stream is timestamped by an RFC 3161
 //!   authority every hour (by default), and receipts carry the token.
+//! - With `[witness]` configured (feature `witness`, Experimental), each stream's checkpoints are
+//!   signed by its checkpoint key too and sent to C2SP witnesses; receipts carry their
+//!   cosignatures.
 //! - Shutdown stops accepting requests, ends tails, and waits for the writes in flight.
 
 mod config;
@@ -49,7 +52,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, broadcast, watch};
 use tokio_stream::wrappers::BroadcastStream;
 
-pub use config::{AnchorConfig, Config, StreamConfig, TokenConfig};
+pub use config::{AnchorConfig, Config, StreamConfig, TokenConfig, WitnessConfig, WitnessUrl};
 pub use error::{ApiError, ErrorBody, ErrorCode, Violation};
 pub use rest::openapi_yaml;
 
@@ -152,6 +155,21 @@ struct Lane {
     writable: AtomicBool,
     /// The stream's key store, beside which its data keys live (spec/privacy.md).
     keys: KeyStore,
+    /// Per witness vkey, the size it last cosigned, as far as this process knows (0 at start: a
+    /// 409 tells the real one).
+    #[cfg(feature = "witness")]
+    witnessed: std::sync::Mutex<HashMap<String, u64>>,
+}
+
+/// What a witness did with a stream's latest checkpoint ([`Daemon::witness`]).
+#[cfg(feature = "witness")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Witnessed {
+    /// It cosigned: the store key of the cosignature.
+    Cosigned(String),
+    /// It refused a checkpoint that contradicts one it cosigned, or holds one beyond this
+    /// stream: the stream was rewritten or truncated, or a different history was shown to it.
+    Fork(String),
 }
 
 /// ponytail: every entry in memory, by position (`seq - 1`) and id, verified, for get, tail and
@@ -207,11 +225,6 @@ impl Daemon {
             .or_else(tenbri_index::default_root)
             .ok_or("no index directory: set index_dir or TENBRI_INDEX_DIR")?;
         let mut lanes = BTreeMap::new();
-        let lane_config = LaneConfig {
-            queue: config.queue,
-            deadline: Duration::from_millis(config.deadline_ms),
-            ..LaneConfig::default()
-        };
         // One token for every stream: a PKCS#11 module is initialized once per process.
         #[cfg(feature = "pkcs11")]
         let token = config.pkcs11.as_ref().map(|p| {
@@ -227,7 +240,7 @@ impl Daemon {
                 #[cfg(feature = "pkcs11")]
                 token.clone(),
                 &index_root,
-                lane_config,
+                config,
             )
             .await
             .map_err(|e| format!("stream {name} ({}): {e}", sc.path))?;
@@ -546,6 +559,43 @@ impl Daemon {
         }
     }
 
+    /// Sends the latest checkpoint of every stream to each witness `[witness]` names, unless it
+    /// has its cosignature already; what [`Daemon::witness_every`] runs. Returns what each
+    /// witness did that changed something: a cosignature written, or a fork it refused. Other
+    /// failures (a witness down, a timeout) are logged and retried on the next round.
+    #[cfg(feature = "witness")]
+    pub async fn witness(&self, witnesses: &[WitnessUrl]) -> Vec<Witnessed> {
+        let mut out = vec![];
+        for lane in self.lanes.values() {
+            for w in witnesses {
+                match lane.witness(&w.url, &w.vkey).await {
+                    Ok(Some(Witnessed::Fork(detail))) => {
+                        eprintln!("tenbrid: stream {}: FORK: {detail}", lane.name);
+                        out.push(Witnessed::Fork(detail));
+                    }
+                    Ok(Some(c)) => out.push(c),
+                    Ok(None) => {}
+                    Err(e) => eprintln!("tenbrid: stream {}: witnessing: {e}", lane.name),
+                }
+            }
+        }
+        out
+    }
+
+    /// Runs [`Daemon::witness`] every `every_s` until shutdown, if `[witness]` is configured.
+    #[cfg(feature = "witness")]
+    pub async fn witness_every(&self, config: &Config) {
+        let Some(w) = &config.witness else { return };
+        let mut stop = self.shutdown.subscribe();
+        let mut tick = tokio::time::interval(Duration::from_secs(w.every_s));
+        loop {
+            tokio::select! {
+                _ = tick.tick() => { self.witness(&w.witnesses).await; }
+                _ = async { stop.wait_for(|s| *s).await.is_ok() } => return,
+            }
+        }
+    }
+
     /// Reads the stream from storage and checks all of it against its pinned key.
     pub async fn verify(&self, token: &Token, stream: &str) -> Result<Verified, ApiError> {
         let lane = self.lane(token, stream)?;
@@ -623,8 +673,14 @@ impl Lane {
         keys: &Path,
         #[cfg(feature = "pkcs11")] token: Option<Arc<tenbri_keys::pkcs11::Token>>,
         index_root: &Path,
-        config: LaneConfig,
+        config: &Config,
     ) -> Result<Lane, String> {
+        let witnessed = config.witness.is_some();
+        let config = LaneConfig {
+            queue: config.queue,
+            deadline: Duration::from_millis(config.deadline_ms),
+            ..LaneConfig::default()
+        };
         let head = store
             .get("HEAD")
             .await
@@ -689,6 +745,20 @@ impl Lane {
                 false
             }
         };
+        #[cfg(feature = "witness")]
+        if writable && witnessed {
+            let key = writer
+                .use_checkpoint_key(true)
+                .await
+                .map_err(|e| format!("checkpoint key: {e}"))?
+                .expect("made when missing");
+            eprintln!(
+                "tenbrid: stream {name}: witnesses verify its checkpoints with {}",
+                tenbri_merkle::witness::log_vkey(&head.stream, &key.verifying_key())
+            );
+        }
+        #[cfg(not(feature = "witness"))]
+        let _ = witnessed;
         // One store per stream for the life of the process; the reader borrows it.
         let leaked: &'static AnyStore = Box::leak(Box::new(store.clone()));
         let query_index =
@@ -707,6 +777,8 @@ impl Lane {
             tx: broadcast::channel(TAIL_BUFFER).0,
             writable: AtomicBool::new(writable),
             keys: ks,
+            #[cfg(feature = "witness")]
+            witnessed: std::sync::Mutex::default(),
         };
         lane.sync().await.map_err(|e| e.to_string())?;
         // The query index is rebuilt from the stream just read and verified: whatever the file
@@ -1074,6 +1146,64 @@ fn same(draft: &Entry, stored: &Entry) -> bool {
         d.trace.clone_from(&stored.trace);
     }
     d == *stored
+}
+
+#[cfg(feature = "witness")]
+impl Lane {
+    /// Sends the latest checkpoint to the witness at `url` with verifier key `vkey`, with a
+    /// consistency proof from the size it last cosigned, and stores its cosignature next to the
+    /// checkpoint. `None` if there is no checkpoint, or it has that cosignature already.
+    ///
+    /// ponytail: reads the whole stream for the proof; the lane's reader's hashes when that is slow.
+    async fn witness(&self, url: &str, vkey: &str) -> std::io::Result<Option<Witnessed>> {
+        use tenbri_anchor::witness::{Added, add_checkpoint};
+        let w = tenbri_merkle::witness::Witness::parse(vkey).map_err(std::io::Error::other)?;
+        let Some((size, note)) = tenbri_writer::latest_checkpoint(&self.store).await? else {
+            return Ok(None);
+        };
+        let key = format!("{}{}.sig", checkpoint::cosignatures_dir(size), w.key_id());
+        if self.store.get(&key).await?.is_some() {
+            return Ok(None);
+        }
+        let mut r = Reader::new(&self.store, Some(&self.pin));
+        r.poll().await.map_err(std::io::Error::other)?;
+        let hashes = r
+            .hashes()
+            .get(..size as usize)
+            .ok_or_else(|| std::io::Error::other("the latest checkpoint is beyond the stream"))?;
+        let mut old = *self.witnessed.lock().expect("lock").get(vkey).unwrap_or(&0);
+        for _ in 0..2 {
+            let proof =
+                tenbri_merkle::tree::consistency_proof(hashes, old.min(size)).expect("old <= size");
+            match add_checkpoint(url, &w, old, &proof, &note).await? {
+                Added::Cosigned(line) => {
+                    self.store.put_if_absent(&key, line.as_bytes()).await?;
+                    self.witnessed
+                        .lock()
+                        .expect("lock")
+                        .insert(vkey.into(), size);
+                    return Ok(Some(Witnessed::Cosigned(key)));
+                }
+                Added::Conflict(n) if n <= size && n != old => old = n,
+                Added::Conflict(n) => {
+                    return Ok(Some(Witnessed::Fork(format!(
+                        "witness {} cosigned size {n}, beyond this stream's checkpoint at {size}",
+                        w.name
+                    ))));
+                }
+                Added::Fork(why) => {
+                    return Ok(Some(Witnessed::Fork(format!(
+                        "witness {} refused the checkpoint at size {size} as inconsistent with size {old} it cosigned: {why}",
+                        w.name
+                    ))));
+                }
+            }
+        }
+        Err(std::io::Error::other(format!(
+            "witness {}: conflict again",
+            w.name
+        )))
+    }
 }
 
 /// Timestamps the store's latest checkpoint unless it already has a token; the token's key.

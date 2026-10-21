@@ -22,6 +22,8 @@ keychain = ["tenbri-keys/keychain"]
 s3 = ["tenbri-store/s3"]
 # Experimental, not shipped: stream keys in a PKCS#11 token (`init --pkcs11 --experimental`).
 pkcs11 = ["tenbri-keys/pkcs11", "dep:zeroize"]
+# Witness cosignatures (Experimental): receipt verify --witness.
+witness = ["tenbri-merkle/witness", "tenbri-writer/witness"]
 
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
@@ -42,7 +44,7 @@ zeroize = { version = "1", optional = true }
 [dev-dependencies]
 # Not published: only the test of pins recorded by the SDKs' stream creation uses it.
 tenbri-bindings = { path = "../../bindings/common" }
-tenbri-anchor = { workspace = true, features = ["test-tsa"] }
+tenbri-anchor = { workspace = true, features = ["test-tsa", "test-witness"] }
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 
 [lints]

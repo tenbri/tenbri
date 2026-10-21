@@ -24,6 +24,10 @@
 //! token = "tenbri"                 # the token's label; TENBRI_PKCS11_TOKEN. The user PIN comes
 //!                                  # from TENBRI_PKCS11_PIN only, never the file
 //!
+//! [witness]                        # optional, Experimental (feature `witness`): C2SP witnesses
+//! every_s = 300                    # how often the latest checkpoint is sent to each witness
+//! witnesses = [{ url = "https://witness.example/", vkey = "witness.example+1a2b3c4d+B..." }]
+//!
 //! [[tokens]]                       # `tenbrid token` makes one
 //! sha256 = "sha256:..."            # SHA-256 of the bearer token; the token is never stored
 //! principal = { kind = "agent", id = "support-assistant" }
@@ -63,6 +67,7 @@ pub struct Config {
     #[serde(default)]
     pub tokens: Vec<TokenConfig>,
     pub anchor: Option<AnchorConfig>,
+    pub witness: Option<WitnessConfig>,
     /// Where stream keys with the `pkcs11` backend are (`tenbri init --pkcs11`).
     #[cfg(feature = "pkcs11")]
     pub pkcs11: Option<Pkcs11Config>,
@@ -91,6 +96,29 @@ impl std::fmt::Debug for Pkcs11Config {
             .field("token", &self.token)
             .finish_non_exhaustive()
     }
+}
+
+/// Experimental (feature `witness`): the latest checkpoint of every stream goes to each C2SP
+/// witness every `every_s` seconds (5 minutes by default), signed by the stream's checkpoint
+/// key; the cosignatures go next to it, `cosignatures/<size>/<key ID>.sig`, and into receipts.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WitnessConfig {
+    #[serde(default = "witness_every_s")]
+    pub every_s: u64,
+    pub witnesses: Vec<WitnessUrl>,
+}
+
+/// A witness: its submission prefix (`<url>/add-checkpoint`) and its verifier key.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WitnessUrl {
+    pub url: String,
+    pub vkey: String,
+}
+
+fn witness_every_s() -> u64 {
+    300
 }
 
 /// Opt-in RFC 3161 timestamps: the latest checkpoint of every stream, every `every_s` seconds
@@ -208,6 +236,19 @@ impl Config {
         }
         if c.anchor.as_ref().is_some_and(|a| a.every_s == 0) {
             return Err("anchor: every_s must be at least 1".into());
+        }
+        if let Some(w) = &c.witness {
+            if !cfg!(feature = "witness") {
+                return Err("[witness] needs tenbrid built with the `witness` feature".into());
+            }
+            if w.every_s == 0 || w.witnesses.is_empty() {
+                return Err("witness: every_s must be at least 1, and witnesses not empty".into());
+            }
+            #[cfg(feature = "witness")]
+            for x in &w.witnesses {
+                tenbri_merkle::witness::Witness::parse(&x.vkey)
+                    .map_err(|e| format!("witness: {}", e.detail))?;
+            }
         }
         if c.queue == 0 || c.queue > tokio::sync::Semaphore::MAX_PERMITS {
             return Err(format!("queue = {}: out of range", c.queue));

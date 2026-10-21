@@ -377,6 +377,13 @@ enum ReceiptCommand {
         /// tokens in the receipt are not checked.
         #[arg(long, value_name = "PEM")]
         tsa_roots: Option<PathBuf>,
+        /// A witness you trust, by its verifier key (name+id+base64); repeat for several.
+        /// Experimental: needs the `witness` feature.
+        #[arg(long, value_name = "VKEY")]
+        witness: Vec<String>,
+        /// How many of the --witness keys must have cosigned the checkpoint [default: all].
+        #[arg(long, value_name = "N", requires = "witness")]
+        witnesses: Option<usize>,
     },
 }
 
@@ -686,8 +693,16 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
                     file,
                     key,
                     tsa_roots,
+                    witness,
+                    witnesses,
                 },
-        } => receipt_verify(file, &pin(key)?, tsa_roots.as_deref()),
+        } => receipt_verify(
+            file,
+            &pin(key)?,
+            tsa_roots.as_deref(),
+            witness,
+            witnesses.unwrap_or(witness.len()),
+        ),
         Command::Schema {
             command: SchemaCommand::Check { paths, schema },
         } => schema_check(schema, paths).await,
@@ -740,7 +755,13 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
     }
 }
 
-fn receipt_verify(file: &Path, pin: &str, tsa_roots: Option<&Path>) -> Result<u8, Fail> {
+fn receipt_verify(
+    file: &Path,
+    pin: &str,
+    tsa_roots: Option<&Path>,
+    witness: &[String],
+    need: usize,
+) -> Result<u8, Fail> {
     let at = |p: &Path, e: &dyn std::fmt::Display| Fail(2, format!("{}: {e}", p.display()));
     let bytes = std::fs::read(file).map_err(|e| at(file, &e))?;
     let roots = tsa_roots
@@ -752,6 +773,13 @@ fn receipt_verify(file: &Path, pin: &str, tsa_roots: Option<&Path>) -> Result<u8
         .transpose()?;
     let v = match tenbri_anchor::verify_receipt(&bytes, pin, roots.as_deref()) {
         Ok(v) => v,
+        Err(e) => {
+            println!("receipt does not verify: {e}");
+            return Ok(1);
+        }
+    };
+    let cosigned = match cosignatures(&v.receipt, witness, need)? {
+        Ok(c) => c,
         Err(e) => {
             println!("receipt does not verify: {e}");
             return Ok(1);
@@ -793,7 +821,44 @@ fn receipt_verify(file: &Path, pin: &str, tsa_roots: Option<&Path>) -> Result<u8
         ),
         None => {}
     }
+    for (name, time) in cosigned {
+        println!(
+            "cosigned by witness {name} at {} (its time): it saw no other history up to this checkpoint",
+            tenbri_anchor::rfc3339(time)
+        );
+    }
     Ok(0)
+}
+
+/// The witnesses pinned by `vkeys` that cosigned the receipt's checkpoint, with their time; at
+/// least `need` of them, or why not (spec/checkpoints.md, section 6).
+#[cfg(feature = "witness")]
+fn cosignatures(
+    r: &tenbri_merkle::receipt::Verified,
+    vkeys: &[String],
+    need: usize,
+) -> Result<Result<Vec<(String, u64)>, tenbri_core::Error>, Fail> {
+    use tenbri_merkle::witness::{self, Witness};
+    let ws = vkeys
+        .iter()
+        .map(|k| Witness::parse(k).map_err(|e| Fail(2, e.detail)))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(witness::verify(r, &ws, need).map(|c| c.into_iter().map(|c| (c.name, c.time)).collect()))
+}
+
+#[cfg(not(feature = "witness"))]
+fn cosignatures(
+    _: &tenbri_merkle::receipt::Verified,
+    vkeys: &[String],
+    _: usize,
+) -> Result<Result<Vec<(String, u64)>, tenbri_core::Error>, Fail> {
+    if vkeys.is_empty() {
+        return Ok(Ok(vec![]));
+    }
+    Err(Fail(
+        2,
+        "--witness needs tenbri built with the `witness` feature (Experimental)".into(),
+    ))
 }
 
 /// An entry's kind, and its phase if it has one: `decision intent`.
@@ -1536,6 +1601,10 @@ async fn open_writer(store: AnyStore, ks: KeyStore) -> Result<Writer<AnyStore, C
         .with_checkpoints(Some(ks.dir().join(CHECKPOINT_FILE)))
         .await?;
     w.use_keys(ks).await?;
+    // A stream whose checkpoint key tenbrid certified: checkpoints made here are signed for
+    // witnesses too. The CLI never certifies one.
+    #[cfg(feature = "witness")]
+    w.use_checkpoint_key(false).await?;
     Ok(w)
 }
 

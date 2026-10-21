@@ -462,25 +462,29 @@ impl<S: Store, H: Hook<S>> Writer<S, H> {
                 }
             }
         }
-        let current = self
-            .chain
-            .stream_key()
-            .ok_or_else(|| WriteError::NoSession("the stream has no stream key".into()))?
-            .to_owned();
-        let stream_key = keys.load(&current).map_err(|e| {
-            WriteError::NoSession(format!(
-                "no usable session key, and the stream key {current} is not in {}: {e}",
-                keys.dir().display()
-            ))
-        })?;
+        let stream_key = self.load_stream_key(&keys)?;
         let session = Key::new_session(now, SESSION_LIFETIME_MS)?;
         let backend = metas
             .iter()
-            .find(|m| m.id == current)
+            .find(|m| m.id == stream_key.id)
             .map_or(Backend::File, |m| m.backend.for_sessions());
         keys.save(&session, backend)?;
         self.certify_session(&stream_key, session).await?;
         Ok(())
+    }
+
+    /// The current stream key, from `keys`.
+    pub(crate) fn load_stream_key(&self, keys: &KeyStore) -> Result<Key, WriteError> {
+        let current = self
+            .chain
+            .stream_key()
+            .ok_or_else(|| WriteError::NoSession("the stream has no stream key".into()))?;
+        keys.load(current).map_err(|e| {
+            WriteError::NoSession(format!(
+                "no usable session key, and the stream key {current} is not in {}: {e}",
+                keys.dir().display()
+            ))
+        })
     }
 
     /// Signs with `key` from now on: a session key this stream certified, not revoked, valid now.

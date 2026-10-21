@@ -1,0 +1,239 @@
+{
+  "checkpoint_key_ext": {
+    "checkpoint_key": "ed25519:fdfd30b7d73aaf513ba555204e56929a950f9aed7474491c760a91bc4794eba1"
+  },
+  "cosignatures": [
+    {
+      "name": "one-of-one",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4dxlpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n",
+      "result": {
+        "ok": [
+          {
+            "name": "witness.example/w1",
+            "time": 1792000000
+          }
+        ]
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "two-of-two",
+      "need": 2,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4dxlpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n— witness.example/w2 0HT/IQAAAABqz8AFByImLeYwCtZsbqU9+sX86L8ULoIpyDPV2hBm64+pPR0l5do7H7EuVvdoBEQXglHN7PypkGFhPDeRtv+rF4ikBg==\n",
+      "result": {
+        "ok": [
+          {
+            "name": "witness.example/w1",
+            "time": 1792000000
+          },
+          {
+            "name": "witness.example/w2",
+            "time": 1792000005
+          }
+        ]
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M",
+        "witness.example/w2+d074ff21+BD8YV08c3/V0BujwJrzbTyT4oXnltfATmqXuZ+WXvgJ5"
+      ]
+    },
+    {
+      "name": "one-of-two-pinned",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4dxlpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n",
+      "result": {
+        "ok": [
+          {
+            "name": "witness.example/w1",
+            "time": 1792000000
+          }
+        ]
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M",
+        "witness.example/w2+d074ff21+BD8YV08c3/V0BujwJrzbTyT4oXnltfATmqXuZ+WXvgJ5"
+      ]
+    },
+    {
+      "name": "missing-cosignature",
+      "need": 2,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4dxlpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n",
+      "result": {
+        "error": "unwitnessed"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M",
+        "witness.example/w2+d074ff21+BD8YV08c3/V0BujwJrzbTyT4oXnltfATmqXuZ+WXvgJ5"
+      ]
+    },
+    {
+      "name": "none-required",
+      "need": 0,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n",
+      "result": {
+        "ok": []
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "unpinned-witness",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w2 0HT/IQAAAABqz8AFByImLeYwCtZsbqU9+sX86L8ULoIpyDPV2hBm64+pPR0l5do7H7EuVvdoBEQXglHN7PypkGFhPDeRtv+rF4ikBg==\n",
+      "result": {
+        "error": "unwitnessed"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "changed-signature",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4d1lpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n",
+      "result": {
+        "error": "unwitnessed"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "changed-time",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAUqx7VTFP85oAGxjM6BVk5N7L9Ibc9gkb1dnxbykEpZqRhLVCzqV4kT+Q46mR09/8UZnjFIdBLJ5cb7/MAlsmBA==\n",
+      "result": {
+        "error": "unwitnessed"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "split-view",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\ndoL9YDimnRRUw1z+LoxSrlrqPWXbOV0vvTztqeIzmr8=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+rjpbDL1ETFCm+eZNbhZfUswGMAp1+4QDRPxYWejBzY7bk7hvex9hO7XydJMkFlSmnt41aqIVl9qI9ky60j4lg0=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLXw20J3AI1zbJPrw2b2ZeTocohMRI5JlSgNCLHtC4L+ZDznRMvA9t/IJIadAlrm0RJDftH6XXVkr0KiB0BJUHwc=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4dxlpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n",
+      "result": {
+        "error": "unwitnessed"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "same-witness-pinned-twice",
+      "need": 2,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4dxlpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n",
+      "result": {
+        "error": "unwitnessed"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M",
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "second-line-by-witness-bad",
+      "need": 1,
+      "note": "tnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4dxlpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n— witness.example/w1 fEkgMwAAAABqz8AAjz8JRN7hzLPwioyv5Ke3jxNE5IiKmMasBJ9M4d1lpQ1UA2+7H1sGE8afIIymGj3nAVuWZaz6gFIVIuReJnptAA==\n",
+      "result": {
+        "error": "unwitnessed"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    }
+  ],
+  "keys": [
+    {
+      "origin": "tnb1:170241c12e8724974ea3b10fe536b7d8",
+      "pub": "ed25519:fdfd30b7d73aaf513ba555204e56929a950f9aed7474491c760a91bc4794eba1",
+      "role": "checkpoint",
+      "vkey": "tnb1:170241c12e8724974ea3b10fe536b7d8+bb83202d+Af39MLfXOq9RO6VVIE5WkpqVD5rtdHRJHHYKkbxHlOuh"
+    },
+    {
+      "name": "witness.example/w1",
+      "pub": "ed25519:194f8b2de1a30394a11a516878efb2c22ac657089a3cf14fa79915c427089dcc",
+      "role": "witness",
+      "vkey": "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+    },
+    {
+      "name": "witness.example/w2",
+      "pub": "ed25519:3f18574f1cdff57406e8f026bcdb4f24f8a179e5b5f0139aa5ee67e597be0279",
+      "role": "witness",
+      "vkey": "witness.example/w2+d074ff21+BD8YV08c3/V0BujwJrzbTyT4oXnltfATmqXuZ+WXvgJ5"
+    }
+  ],
+  "receipts": [
+    {
+      "name": "witnessed",
+      "need": 1,
+      "pin": "sha256:170241c12e8724974ea3b10fe536b7d848f7cbd0963f55eecf0a11e9edf52e9c",
+      "receipt": "{\"checkpoint\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\\n5\\nGpV8r2UEcP1d8hXhuK2VcOrIrnWFuPuQCUZZHc68Jqo=\\n\\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+iiTuHXWIiOlZBAymQ/tMp4rGFEUAyIOwWIz0MmrKFIei0cAlS4hud98jJ2rEw3ij1tg0AGS/jKBgqKldQcdNgk=\\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRPyYTJL6qf7242t8D4JJ7ehpYxPwxIpJ/rzGRy2fgFgTUD+g51IOjK7Ny9q3Iwf7y2kgslPNu6vHGjG470Ntgs=\\n— witness.example/w1 fEkgMwAAAABqz8AAwICOJZr0iYgJjs0UKSawzf1s7AFJ30p0w4TXK8KDTEEE6uG7wV6V/kRjvhzns3m5XTC0udqMJO8N4WiQ9vGnAg==\\n\",\"entries\":[{\"entry\":{\"id\":\"01M4XRC0000000000000000001\",\"key\":{\"id\":\"stream:a\",\"op\":\"certify\",\"pub\":\"ed25519:26ea1e8cd907cac3977eecd8cee7fa3d13aa0303ce53ce7fe359c3ebf17c525d\",\"role\":\"stream\"},\"kind\":\"key\",\"seq\":1,\"sig\":\"ed25519:9e5b7b2b596308ba7da098efe976e586de655e98aace135eaa4cb7dcbcdf234b9933fe5292d1b447679a3561624a78b3ac78d25b2796ea461b4095fe67160609\",\"signer\":\"stream:a\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:41.000Z\",\"v\":1},\"proof\":[\"sha256:7a0e1bc51a435b62c6430cb55257a6e7a9eb88cc619cd06084bff12128097386\",\"sha256:5f3725e0eb4ea5cf2c44697d96f6fbdbd04c23de04c93a45000b3b5b899dd6d1\",\"sha256:463b9700886662276316efa089f53f4754c3c92bc43a60dc7427da29ef708d7d\"]},{\"entry\":{\"id\":\"01M4XRC0000000000000000002\",\"key\":{\"id\":\"sess:a1\",\"not_after\":\"2026-10-15T17:46:40.000Z\",\"op\":\"certify\",\"pub\":\"ed25519:53cd16c1c0d3dee6434208cfd227ee81a68b8611ed8fa242a3b5a0b56f878cdd\",\"role\":\"session\"},\"kind\":\"key\",\"prev\":\"sha256:d2ffafa1f9a3d630fc6dcd3101e68633aef8d1b5ddc3049608e4690debc183e4\",\"seq\":2,\"sig\":\"ed25519:cb77c4f54b3034828eb5615cc0f0cfa620381889e8fc21fc8a0d9310c7ca06457e3e59b568689f8f3df29dcd523991d232817f75b3119352af1fb82a32012e01\",\"signer\":\"stream:a\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:42.000Z\",\"v\":1},\"proof\":[\"sha256:d2ffafa1f9a3d630fc6dcd3101e68633aef8d1b5ddc3049608e4690debc183e4\",\"sha256:5f3725e0eb4ea5cf2c44697d96f6fbdbd04c23de04c93a45000b3b5b899dd6d1\",\"sha256:463b9700886662276316efa089f53f4754c3c92bc43a60dc7427da29ef708d7d\"]},{\"entry\":{\"ext\":{\"checkpoint_key\":\"ed25519:fdfd30b7d73aaf513ba555204e56929a950f9aed7474491c760a91bc4794eba1\"},\"id\":\"01M4XRC0000000000000000004\",\"key\":{\"id\":\"sess:w\",\"not_after\":\"2026-10-15T17:46:40.000Z\",\"op\":\"certify\",\"pub\":\"ed25519:12bc3284981fb7736d8aff6ce2985512b34f46b7be8bee88c48d32e411bebd19\",\"role\":\"session\"},\"kind\":\"key\",\"prev\":\"sha256:a2f2a5cb6d6190c497139ef887dfdd0dc5df01864c6324d40539efe952ccdf73\",\"seq\":4,\"sig\":\"ed25519:0ea01f1edde3cf22679b861e24e20c6e0f781dbea7b6b118eab5188eaf36e870f9202e35fc502ee23c33f06673c9f8c1b7e55876a5b66dceddbfbdd64224ed0c\",\"signer\":\"stream:a\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:44.000Z\",\"v\":1},\"proof\":[\"sha256:a2f2a5cb6d6190c497139ef887dfdd0dc5df01864c6324d40539efe952ccdf73\",\"sha256:051b3ba2672c298b31bef454ae3ab8ecc9372bc757abfc95d33dceee5a9ad175\",\"sha256:463b9700886662276316efa089f53f4754c3c92bc43a60dc7427da29ef708d7d\"]},{\"entry\":{\"ext\":{\"x-test\":{\"n\":1}},\"id\":\"01M4XRC0000000000000000005\",\"kind\":\"note\",\"prev\":\"sha256:035829ccb755413112c7319af70854e7516c4a3ca5893506aabeb25ca638719d\",\"seq\":5,\"sig\":\"ed25519:0412db815f66ab2db0f8b1d64b6f7dfa270d0bef4f8139974727b68a8e445f17db5d9ba04f346966607a1c4d136e370ba6810a03637ac20e2f77a987a174c10a\",\"signer\":\"sess:a1\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:45.000Z\",\"v\":1},\"proof\":[\"sha256:886af564dc2188a663196f674b2bed769bcf41e872e8ea8ce7e7983eabb57f1c\"]}],\"v\":1}\n",
+      "result": {
+        "ok": [
+          {
+            "name": "witness.example/w1",
+            "time": 1792000000
+          }
+        ]
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "checkpoint-key-line-changed",
+      "need": 1,
+      "pin": "sha256:170241c12e8724974ea3b10fe536b7d848f7cbd0963f55eecf0a11e9edf52e9c",
+      "receipt": "{\"checkpoint\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\\n5\\nGpV8r2UEcP1d8hXhuK2VcOrIrnWFuPuQCUZZHc68Jqo=\\n\\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+iiTuHXWIiOlZBAymQ/tMp4rGFEUAyIOwWIz0MmrKFIei0cAlS4hud98jJ2rEw3ij1tg0AGS/jKBgqKldQcdNgk=\\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRPyYTJL6qf7242t8D4JJ7ehpYxPwxIpJ/rzGRy2fgFgTUD+g5xIOjK7Ny9q3Iwf7y2kgslPNu6vHGjG470Ntgs=\\n— witness.example/w1 fEkgMwAAAABqz8AAwICOJZr0iYgJjs0UKSawzf1s7AFJ30p0w4TXK8KDTEEE6uG7wV6V/kRjvhzns3m5XTC0udqMJO8N4WiQ9vGnAg==\\n\",\"entries\":[{\"entry\":{\"id\":\"01M4XRC0000000000000000001\",\"key\":{\"id\":\"stream:a\",\"op\":\"certify\",\"pub\":\"ed25519:26ea1e8cd907cac3977eecd8cee7fa3d13aa0303ce53ce7fe359c3ebf17c525d\",\"role\":\"stream\"},\"kind\":\"key\",\"seq\":1,\"sig\":\"ed25519:9e5b7b2b596308ba7da098efe976e586de655e98aace135eaa4cb7dcbcdf234b9933fe5292d1b447679a3561624a78b3ac78d25b2796ea461b4095fe67160609\",\"signer\":\"stream:a\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:41.000Z\",\"v\":1},\"proof\":[\"sha256:7a0e1bc51a435b62c6430cb55257a6e7a9eb88cc619cd06084bff12128097386\",\"sha256:5f3725e0eb4ea5cf2c44697d96f6fbdbd04c23de04c93a45000b3b5b899dd6d1\",\"sha256:463b9700886662276316efa089f53f4754c3c92bc43a60dc7427da29ef708d7d\"]},{\"entry\":{\"id\":\"01M4XRC0000000000000000002\",\"key\":{\"id\":\"sess:a1\",\"not_after\":\"2026-10-15T17:46:40.000Z\",\"op\":\"certify\",\"pub\":\"ed25519:53cd16c1c0d3dee6434208cfd227ee81a68b8611ed8fa242a3b5a0b56f878cdd\",\"role\":\"session\"},\"kind\":\"key\",\"prev\":\"sha256:d2ffafa1f9a3d630fc6dcd3101e68633aef8d1b5ddc3049608e4690debc183e4\",\"seq\":2,\"sig\":\"ed25519:cb77c4f54b3034828eb5615cc0f0cfa620381889e8fc21fc8a0d9310c7ca06457e3e59b568689f8f3df29dcd523991d232817f75b3119352af1fb82a32012e01\",\"signer\":\"stream:a\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:42.000Z\",\"v\":1},\"proof\":[\"sha256:d2ffafa1f9a3d630fc6dcd3101e68633aef8d1b5ddc3049608e4690debc183e4\",\"sha256:5f3725e0eb4ea5cf2c44697d96f6fbdbd04c23de04c93a45000b3b5b899dd6d1\",\"sha256:463b9700886662276316efa089f53f4754c3c92bc43a60dc7427da29ef708d7d\"]},{\"entry\":{\"ext\":{\"checkpoint_key\":\"ed25519:fdfd30b7d73aaf513ba555204e56929a950f9aed7474491c760a91bc4794eba1\"},\"id\":\"01M4XRC0000000000000000004\",\"key\":{\"id\":\"sess:w\",\"not_after\":\"2026-10-15T17:46:40.000Z\",\"op\":\"certify\",\"pub\":\"ed25519:12bc3284981fb7736d8aff6ce2985512b34f46b7be8bee88c48d32e411bebd19\",\"role\":\"session\"},\"kind\":\"key\",\"prev\":\"sha256:a2f2a5cb6d6190c497139ef887dfdd0dc5df01864c6324d40539efe952ccdf73\",\"seq\":4,\"sig\":\"ed25519:0ea01f1edde3cf22679b861e24e20c6e0f781dbea7b6b118eab5188eaf36e870f9202e35fc502ee23c33f06673c9f8c1b7e55876a5b66dceddbfbdd64224ed0c\",\"signer\":\"stream:a\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:44.000Z\",\"v\":1},\"proof\":[\"sha256:a2f2a5cb6d6190c497139ef887dfdd0dc5df01864c6324d40539efe952ccdf73\",\"sha256:051b3ba2672c298b31bef454ae3ab8ecc9372bc757abfc95d33dceee5a9ad175\",\"sha256:463b9700886662276316efa089f53f4754c3c92bc43a60dc7427da29ef708d7d\"]},{\"entry\":{\"ext\":{\"x-test\":{\"n\":1}},\"id\":\"01M4XRC0000000000000000005\",\"kind\":\"note\",\"prev\":\"sha256:035829ccb755413112c7319af70854e7516c4a3ca5893506aabeb25ca638719d\",\"seq\":5,\"sig\":\"ed25519:0412db815f66ab2db0f8b1d64b6f7dfa270d0bef4f8139974727b68a8e445f17db5d9ba04f346966607a1c4d136e370ba6810a03637ac20e2f77a987a174c10a\",\"signer\":\"sess:a1\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:45.000Z\",\"v\":1},\"proof\":[\"sha256:886af564dc2188a663196f674b2bed769bcf41e872e8ea8ce7e7983eabb57f1c\"]}],\"v\":1}\n",
+      "result": {
+        "error": "bad_checkpoint"
+      },
+      "witnesses": [
+        "witness.example/w1+7c492033+BBlPiy3howOUoRpRaHjvssIqxlcImjzxT6eZFcQnCJ3M"
+      ]
+    },
+    {
+      "name": "witnessed-not-required",
+      "need": 0,
+      "pin": "sha256:170241c12e8724974ea3b10fe536b7d848f7cbd0963f55eecf0a11e9edf52e9c",
+      "receipt": "{\"checkpoint\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\\n5\\nGpV8r2UEcP1d8hXhuK2VcOrIrnWFuPuQCUZZHc68Jqo=\\n\\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+iiTuHXWIiOlZBAymQ/tMp4rGFEUAyIOwWIz0MmrKFIei0cAlS4hud98jJ2rEw3ij1tg0AGS/jKBgqKldQcdNgk=\\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRPyYTJL6qf7242t8D4JJ7ehpYxPwxIpJ/rzGRy2fgFgTUD+g51IOjK7Ny9q3Iwf7y2kgslPNu6vHGjG470Ntgs=\\n— witness.example/w1 fEkgMwAAAABqz8AAwICOJZr0iYgJjs0UKSawzf1s7AFJ30p0w4TXK8KDTEEE6uG7wV6V/kRjvhzns3m5XTC0udqMJO8N4WiQ9vGnAg==\\n\",\"entries\":[{\"entry\":{\"id\":\"01M4XRC0000000000000000001\",\"key\":{\"id\":\"stream:a\",\"op\":\"certify\",\"pub\":\"ed25519:26ea1e8cd907cac3977eecd8cee7fa3d13aa0303ce53ce7fe359c3ebf17c525d\",\"role\":\"stream\"},\"kind\":\"key\",\"seq\":1,\"sig\":\"ed25519:9e5b7b2b596308ba7da098efe976e586de655e98aace135eaa4cb7dcbcdf234b9933fe5292d1b447679a3561624a78b3ac78d25b2796ea461b4095fe67160609\",\"signer\":\"stream:a\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:41.000Z\",\"v\":1},\"proof\":[\"sha256:7a0e1bc51a435b62c6430cb55257a6e7a9eb88cc619cd06084bff12128097386\",\"sha256:5f3725e0eb4ea5cf2c44697d96f6fbdbd04c23de04c93a45000b3b5b899dd6d1\",\"sha256:463b9700886662276316efa089f53f4754c3c92bc43a60dc7427da29ef708d7d\"]},{\"entry\":{\"id\":\"01M4XRC0000000000000000002\",\"key\":{\"id\":\"sess:a1\",\"not_after\":\"2026-10-15T17:46:40.000Z\",\"op\":\"certify\",\"pub\":\"ed25519:53cd16c1c0d3dee6434208cfd227ee81a68b8611ed8fa242a3b5a0b56f878cdd\",\"role\":\"session\"},\"kind\":\"key\",\"prev\":\"sha256:d2ffafa1f9a3d630fc6dcd3101e68633aef8d1b5ddc3049608e4690debc183e4\",\"seq\":2,\"sig\":\"ed25519:cb77c4f54b3034828eb5615cc0f0cfa620381889e8fc21fc8a0d9310c7ca06457e3e59b568689f8f3df29dcd523991d232817f75b3119352af1fb82a32012e01\",\"signer\":\"stream:a\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:42.000Z\",\"v\":1},\"proof\":[\"sha256:d2ffafa1f9a3d630fc6dcd3101e68633aef8d1b5ddc3049608e4690debc183e4\",\"sha256:5f3725e0eb4ea5cf2c44697d96f6fbdbd04c23de04c93a45000b3b5b899dd6d1\",\"sha256:463b9700886662276316efa089f53f4754c3c92bc43a60dc7427da29ef708d7d\"]},{\"entry\":{\"ext\":{\"checkpoint_key\":\"ed25519:fdfd30b7d73aaf513ba555204e56929a950f9aed7474491c760a91bc4794eba1\"},\"id\":\"01M4XRC0000000000000000004\",\"key\":{\"id\":\"sess:w\",\"not_after\":\"2026-10-15T17:46:40.000Z\",\"op\":\"certify\",\"pub\":\"ed25519:12bc3284981fb7736d8aff6ce2985512b34f46b7be8bee88c48d32e411bebd19\",\"role\":\"session\"},\"kind\":\"key\",\"prev\":\"sha256:a2f2a5cb6d6190c497139ef887dfdd0dc5df01864c6324d40539efe952ccdf73\",\"seq\":4,\"sig\":\"ed25519:0ea01f1edde3cf22679b861e24e20c6e0f781dbea7b6b118eab5188eaf36e870f9202e35fc502ee23c33f06673c9f8c1b7e55876a5b66dceddbfbdd64224ed0c\",\"signer\":\"stream:a\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:44.000Z\",\"v\":1},\"proof\":[\"sha256:a2f2a5cb6d6190c497139ef887dfdd0dc5df01864c6324d40539efe952ccdf73\",\"sha256:051b3ba2672c298b31bef454ae3ab8ecc9372bc757abfc95d33dceee5a9ad175\",\"sha256:463b9700886662276316efa089f53f4754c3c92bc43a60dc7427da29ef708d7d\"]},{\"entry\":{\"ext\":{\"x-test\":{\"n\":1}},\"id\":\"01M4XRC0000000000000000005\",\"kind\":\"note\",\"prev\":\"sha256:035829ccb755413112c7319af70854e7516c4a3ca5893506aabeb25ca638719d\",\"seq\":5,\"sig\":\"ed25519:0412db815f66ab2db0f8b1d64b6f7dfa270d0bef4f8139974727b68a8e445f17db5d9ba04f346966607a1c4d136e370ba6810a03637ac20e2f77a987a174c10a\",\"signer\":\"sess:a1\",\"stream\":\"tnb1:170241c12e8724974ea3b10fe536b7d8\",\"ts\":\"2026-10-14T17:46:45.000Z\",\"v\":1},\"proof\":[\"sha256:886af564dc2188a663196f674b2bed769bcf41e872e8ea8ce7e7983eabb57f1c\"]}],\"v\":1}\n",
+      "result": {
+        "ok": []
+      },
+      "witnesses": []
+    }
+  ],
+  "requests": [
+    {
+      "body": "old 0\n\ntnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n",
+      "old": 0,
+      "proof": []
+    },
+    {
+      "body": "old 7\nBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=\nCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg=\nHGg3eW1cybozLW+31SZlxhZYMyiAhE4tboXjyOsLZjA=\nw+bFjEgC3mcM+DnWk+BP/HwOkcMuqBWG4Ny5QzqaLDA=\nwkoEj/itBTQw2PEwxDYTQm4zXSd5pSZCswA/icI1ujg=\n\ntnb1:170241c12e8724974ea3b10fe536b7d8\n10\nvh4ijkUOB5W3Gx5aoJLOwWf0CiS+N9lcAHBuyIGA9k0=\n\n— tnb1:170241c12e8724974ea3b10fe536b7d8 r5sy+gr7+F8k5ZQnHg+6CpEp/v5EyjQBjZRkSOMdzMD4W9l1GJrKX8fossaY8xEklPhiQh+G61Gficrp5xy8YOJ93gY=\n— tnb1:170241c12e8724974ea3b10fe536b7d8 u4MgLRKZ/ND+BKjNb7JUp/0puabYOPbp9KiVSSDtupDy4r6b8v4AukmwwNHEbSfMfUuC3KvKM94tH9o9XZkPHtugMg0=\n",
+      "old": 7,
+      "proof": [
+        "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg=",
+        "HGg3eW1cybozLW+31SZlxhZYMyiAhE4tboXjyOsLZjA=",
+        "w+bFjEgC3mcM+DnWk+BP/HwOkcMuqBWG4Ny5QzqaLDA=",
+        "wkoEj/itBTQw2PEwxDYTQm4zXSd5pSZCswA/icI1ujg="
+      ]
+    }
+  ],
+  "third_party": [
+    {
+      "line": "— witness.navigli.sunlight.geomys.org o+AP4gAAAABq2S2uIY6RokCS5VsIp5vWJZCzC8t/rkm75Z3yf9ATMgNQr0TzK0MXM6z/h8Q6JCpBzCgTpks4GIknoNJunhYwC+oRAw==\n",
+      "source": "https://witness.navigli.skylight.geomys.org/<sha256(origin)>/checkpoint, 2026-10-22",
+      "text": "markovianprotocol.com/log\n12010\n1jyFVBlENG+Ifo14JNOZDJQ+OeTNaxJx70uRB8VR5Gw=\n",
+      "time": 1792617902,
+      "witness": "witness.navigli.sunlight.geomys.org+a3e00fe2+BNy/co4C1Hn1p+INwJrfUlgz7W55dSZReusH/GhUhJ/G"
+    }
+  ]
+}

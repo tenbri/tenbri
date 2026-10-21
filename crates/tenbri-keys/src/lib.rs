@@ -285,6 +285,9 @@ pub fn default_dir() -> Option<PathBuf> {
 /// one `<location> <fingerprint>` per line, like ssh's known_hosts.
 pub const PINS: &str = "pins";
 
+/// The file the stream's checkpoint key is kept in, in its key directory.
+pub const CHECKPOINT_KEY_FILE: &str = "checkpoint.secret";
+
 /// A stream's location as the pins file records it: an absolute path, or the URL as given.
 pub fn pin_location(location: &str) -> String {
     if tenbri_store::is_url(location) {
@@ -552,6 +555,30 @@ impl KeyStore {
             _ => fs::remove_file(self.dir.join(format!("{name}.secret")))?,
         }
         fs::remove_file(self.dir.join(format!("{name}.json")))
+    }
+
+    /// The stream's checkpoint key (spec/checkpoints.md, section 6), from `checkpoint.secret`:
+    /// the one key witnesses verify checkpoints with. It signs checkpoints only, never entries,
+    /// and is certified by the stream key in a `key` entry's `ext`. `NotFound` if there is none;
+    /// [`KeyStore::new_checkpoint_key`] makes one.
+    ///
+    /// ponytail: a key file only; the OS keychain when someone needs it there.
+    pub fn checkpoint_key(&self) -> io::Result<SigningKey> {
+        let path = self.dir.join(CHECKPOINT_KEY_FILE);
+        let hex = Zeroizing::new(fs::read_to_string(&path)?);
+        let seed = Zeroizing::new(
+            encoding::unhex::<32>(hex.trim())
+                .ok_or_else(|| invalid(format!("{} is corrupt", path.display())))?,
+        );
+        Ok(SigningKey::from_bytes(&seed))
+    }
+
+    /// Makes and stores a new checkpoint key; refuses to replace one (`AlreadyExists`).
+    pub fn new_checkpoint_key(&self) -> io::Result<SigningKey> {
+        let key = generate()?;
+        let hex = Zeroizing::new(encoding::hex(key.as_bytes()));
+        write_new(&self.dir.join(CHECKPOINT_KEY_FILE), hex.as_bytes())?;
+        Ok(key)
     }
 
     #[cfg(feature = "keychain")]

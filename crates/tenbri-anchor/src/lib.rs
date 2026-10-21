@@ -10,6 +10,8 @@
 //! - [`verify`] checks a response against the verifier's pinned TSA roots, with no network.
 //! - [`verify_receipt`] checks a whole receipt: `tenbri_merkle::receipt::verify`, then its tokens.
 //! - `test_tsa` (feature `test-tsa`) is a TSA in memory for tests and test vectors.
+//! - `witness` (feature `witness`, Experimental) submits checkpoints to C2SP witnesses;
+//!   `test_witness` (feature `test-witness`) is a witness in memory for tests.
 
 use std::time::Duration;
 
@@ -29,8 +31,14 @@ use x509_tsp::{MessageImprint, TimeStampReq, TimeStampResp, TspVersion, TstInfo}
 
 #[cfg(feature = "client")]
 mod client;
+#[cfg(any(feature = "test-tsa", feature = "test-witness"))]
+mod test_http;
 #[cfg(feature = "test-tsa")]
 pub mod test_tsa;
+#[cfg(feature = "test-witness")]
+pub mod test_witness;
+#[cfg(feature = "witness")]
+pub mod witness;
 
 #[cfg(feature = "client")]
 pub use client::timestamp;

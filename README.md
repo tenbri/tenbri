@@ -193,14 +193,14 @@ v0.1.0 ships every feature below, each labelled:
 | Format and integrity | ✅ Entry format v1 · ✅ canonical bytes · ✅ hash chain · ✅ signatures · ✅ intent and outcome entries · ✅ links · ✅ Merkle checkpoints · ✅ receipts | |
 | Keys | ✅ Stream and session keys · ✅ rotation · ✅ revocation · ✅ key file · ✅ OS keychain (macOS, Windows) | ✅ [PKCS#11 stream key](docs/hsm.md) (HSM, YubiHSM, SoftHSM) · ⬜ cloud KMS · ⬜ passkey attestations |
 | Storage | ✅ Local disk · 🚧 AWS S3 (tested on MinIO; real S3 before rc.1) · ✅ Cloudflare R2 · ✅ MinIO | ⬜ Google Cloud Storage · ⬜ Azure Blob · ⬜ Postgres |
-| Anchoring | ⬜ Checkpoint publishing to auditors · ✅ RFC 3161 timestamps | ⬜ Sigstore Rekor · ⬜ witnesses |
+| Anchoring | ⬜ Checkpoint publishing to auditors · ✅ RFC 3161 timestamps | ⬜ Sigstore Rekor · ✅ C2SP witness cosignatures ([docs/witnesses.md](docs/witnesses.md)) |
 | Privacy | ✅ Blob encryption · ✅ per-subject keyed digests and erasure · ✅ local key store | |
 | Query | ✅ SQLite or Parquet index | ⬜ `--as-of` time travel · ⬜ Iceberg index |
 | CLI | ✅ init · ✅ append · ✅ verify · ✅ query · ✅ tail · ✅ checkpoint · ✅ receipt · ✅ keys · ✅ erase · ✅ index · ✅ schema check · ⬜ gc | ⬜ export · ⬜ mcp · ⬜ proxy · ⬜ ingest |
 | Bindings | ✅ Rust · ✅ Python · ✅ Node · ✅ WASM verifier | |
 | Adapters | ✅ Claude Agent SDK · ✅ OpenAI Agents SDK · ✅ LangGraph and LangChain | ⬜ Pydantic AI · ⬜ Vercel AI SDK · ⬜ Mastra · ⬜ Google ADK · ⬜ AWS Strands · ⬜ Microsoft Agent Framework · ⬜ CrewAI · ⬜ LlamaIndex · ⬜ A2A |
 | Fleet and liveness | ⬜ `action.net` target fields (host, IP, port) · ⬜ indexed host, IP and domain · ⬜ `query --target-domain` and `--target-ip` | ⬜ run registration and silent-stream alerts in tenbrid · ⬜ proxy-observed entries · ⬜ `query --unmatched` |
-| APIs and tooling | ✅ tenbrid REST and gRPC · ✅ action schemas · ✅ OpenTelemetry correlation · ⬜ webhook and OTLP streaming · ✅ test kit · ⬜ C2SP tiles and witness protocol | ⬜ Generated Go, Java and .NET clients · ⬜ Kafka · ✅ Tenbri UI, read-only (tenbrid serves it at `/`) · ⬜ OpenLineage and W3C PROV exports |
+| APIs and tooling | ✅ tenbrid REST and gRPC · ✅ action schemas · ✅ OpenTelemetry correlation · ⬜ webhook and OTLP streaming · ✅ test kit · ⬜ C2SP tiles | ⬜ Generated Go, Java and .NET clients · ⬜ Kafka · ✅ Tenbri UI, read-only (tenbrid serves it at `/`) · ⬜ OpenLineage and W3C PROV exports |
 
 ## Non-goals
 

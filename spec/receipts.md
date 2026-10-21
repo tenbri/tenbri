@@ -25,7 +25,7 @@ format v1's rules (no duplicate keys, integers only); a failure is `bad_receipt`
 | Member | Required | Rule |
 | --- | --- | --- |
 | `v` | yes | The receipt format version, the integer `1` |
-| `checkpoint` | yes | The signed checkpoint note (checkpoints.md, section 2), as a string, signature lines included |
+| `checkpoint` | yes | The signed checkpoint note (checkpoints.md, section 2), as a string, signature lines included: witnesses' cosignatures too, if it has any (checkpoints.md, section 6, Experimental) |
 | `entries` | yes | A non-empty array of `{entry, proof}`, in strictly increasing `seq` |
 | `rfc3161` | no | A non-empty array of RFC 3161 responses over the checkpoint (section 5), each the standard base64 (padded) of a DER `TimeStampResp` |
 
@@ -77,6 +77,7 @@ first that fails, naming the entry's seq where there is one:
 | 7 | No key entry in the receipt revokes the signer of an entry at its seq or earlier (format v1, section 5, rule 5) | `key_revoked` |
 | 8 | The checkpoint's signer rows (checkpoints.md, section 4): signed by a session key the receipt's key history certified at or before the checkpoint's size and had not revoked by then | `unknown_signer`, `signer_not_allowed`, `key_revoked`, `bad_checkpoint` |
 | 9 | If the verifier pinned TSA roots: each token in `rfc3161` verifies over the checkpoint (section 5) | `bad_timestamp` |
+| 10 | If the verifier pinned witnesses (Experimental): the cosignatures (checkpoints.md, section 6) | `bad_checkpoint`, `unwitnessed` |
 
 Step 4a is format v1's verification of an entry without the rules that need every entry in between:
 `prev` (step 4's second half), id uniqueness (step 5), `hlc` (step 8), and intents and approvals

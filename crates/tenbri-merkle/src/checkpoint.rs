@@ -34,6 +34,13 @@ pub fn anchor_key(size: u64) -> String {
     format!("anchors/{size:012}.tsr")
 }
 
+/// The directory holding witnesses' cosignatures of the checkpoint at `size`, one signature line
+/// per witness, `<key ID hex>.sig` (spec/checkpoints.md, section 6):
+/// `cosignatures/000000002000/`.
+pub fn cosignatures_dir(size: u64) -> String {
+    format!("cosignatures/{size:012}/")
+}
+
 /// The C2SP key ID: the first four bytes of SHA-256(name || 0x0A || 0x01 || public key).
 pub fn key_id(name: &str, key: &VerifyingKey) -> [u8; 4] {
     let mut h = Sha256::new();
@@ -69,10 +76,20 @@ impl Checkpoint {
 
     /// The signed note, as stored under [`key`]. `session` is the writer's current session key.
     pub fn sign(&self, session: &SigningKey) -> Vec<u8> {
+        self.sign_with(&[session])
+    }
+
+    /// The note signed by each of `keys` under the origin's name, in order: the session key, then
+    /// the stream's checkpoint key if it has one (section 6).
+    pub fn sign_with(&self, keys: &[&SigningKey]) -> Vec<u8> {
         let text = self.text();
-        let mut sig = key_id(&self.origin, &session.verifying_key()).to_vec();
-        sig.extend(session.sign(text.as_bytes()).to_bytes());
-        format!("{text}\n\u{2014} {} {}\n", self.origin, base64(&sig)).into_bytes()
+        let mut note = format!("{text}\n");
+        for k in keys {
+            let mut sig = key_id(&self.origin, &k.verifying_key()).to_vec();
+            sig.extend(k.sign(text.as_bytes()).to_bytes());
+            note.push_str(&format!("\u{2014} {} {}\n", self.origin, base64(&sig)));
+        }
+        note.into_bytes()
     }
 }
 
@@ -88,7 +105,7 @@ pub struct Note {
     pub checkpoint: Checkpoint,
     text: String,
     /// Key name, key ID and signature bytes of each signature line.
-    sigs: Vec<(String, [u8; 4], Vec<u8>)>,
+    pub(crate) sigs: Vec<(String, [u8; 4], Vec<u8>)>,
 }
 
 fn bad(detail: impl Into<String>) -> Error {

@@ -16,6 +16,8 @@ workspace = true
 # spans and metrics for appends and verifies through the OpenTelemetry API (tenbri-otlp). Sends
 # nothing unless the application installs an exporter.
 otel = ["dep:tenbri-otlp", "tenbri-otlp/otel"]
+# Witness cosignatures (Experimental): signs checkpoints with the stream's checkpoint key too.
+witness = ["tenbri-merkle/witness"]
 
 [dependencies]
 getrandom = "0.4"

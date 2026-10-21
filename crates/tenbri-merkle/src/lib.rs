@@ -8,10 +8,13 @@
 //! - [`tree`]: the Merkle tree hash over entry hashes, inclusion and consistency proofs.
 //! - [`checkpoint`]: signing, parsing and checking checkpoints, and when the writer makes them.
 //! - [`receipt`]: proofs that entries are in a stream, checked offline against a pinned key.
+//! - `witness` (feature `witness`, Experimental): the checkpoint key and witness cosignatures.
 
 pub mod checkpoint;
 pub mod receipt;
 pub mod tree;
+#[cfg(feature = "witness")]
+pub mod witness;
 
 pub use checkpoint::{Checkpoint, Note};
 pub use tree::Hash;

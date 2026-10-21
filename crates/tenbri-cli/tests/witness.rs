@@ -1,0 +1,162 @@
+//! Experimental: a stream with a checkpoint key, a witness's cosignature next to its checkpoint,
+//! and `receipt verify --witness`.
+#![cfg(feature = "witness")]
+
+use std::path::Path;
+use std::process::{Command, Output};
+
+use tenbri_anchor::test_witness::TestWitness;
+use tenbri_keys::KeyStore;
+use tenbri_merkle::checkpoint;
+use tenbri_merkle::witness::request;
+use tenbri_store::LocalStore;
+use tenbri_writer::Writer;
+
+fn tenbri(keys: &Path, args: &[&str], stdin: &str) -> Output {
+    use std::io::Write;
+    let mut c = Command::new(env!("CARGO_BIN_EXE_tenbri"))
+        .arg("--keys")
+        .arg(keys)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    c.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
+    c.wait_with_output().unwrap()
+}
+
+fn out(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn receipt_verify_requires_witnesses() {
+    let t = std::env::temp_dir().join(format!("tenbri-witness-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&t);
+    let (keys, s) = (t.join("keys"), t.join("audit").join("support"));
+    let st = s.to_str().unwrap();
+    let o = tenbri(&keys, &["init", st], "");
+    let fp = out(&o)
+        .lines()
+        .find_map(|l| l.strip_prefix("stream key fingerprint (pin it): "))
+        .unwrap()
+        .to_owned();
+    let intent = r#"{"kind":"decision","phase":"intent","source":"sdk","principal":{"kind":"agent","id":"a"},"action":{"type":"reply_ticket","target":"t:1"}}"#;
+    let o = tenbri(&keys, &["append", st], intent);
+    let stored: serde_json::Value = serde_json::from_str(out(&o).trim()).unwrap();
+    let (id, stream) = (
+        stored["id"].as_str().unwrap(),
+        stored["stream"].as_str().unwrap(),
+    );
+
+    // Not witnessed: the CLI makes no checkpoint key, and checkpoints as before.
+    let dir = keys.join(stream.replace(':', "-"));
+    let secret = dir.join(tenbri_keys::CHECKPOINT_KEY_FILE);
+    let o = tenbri(&keys, &["checkpoint", st], "");
+    assert!(o.status.success(), "{}", out(&o));
+    assert!(!secret.exists());
+
+    // What tenbrid's [witness] does: makes the checkpoint key, certifies it, checkpoints.
+    let ks = KeyStore::open(&keys, &s, stream).unwrap();
+    let open = || async {
+        let store = LocalStore::open(&s).unwrap();
+        let mut w = Writer::open(store, Some(&fp))
+            .await
+            .unwrap()
+            .with_checkpoints(None)
+            .await
+            .unwrap();
+        w.use_keys(ks.clone()).await.unwrap();
+        w
+    };
+    let ck = open()
+        .await
+        .use_checkpoint_key(true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(ks.checkpoint_key().unwrap(), ck);
+    let size: u64 = 4; // genesis, session, intent, the session certifying the checkpoint key
+    let note = std::fs::read(s.join(checkpoint::key(size))).unwrap();
+    // Now the CLI signs with it too, and never makes another.
+    let o = tenbri(&keys, &["append", st], intent);
+    assert!(o.status.success(), "{}", out(&o));
+
+    // A certified key whose secret is gone is an error, never a new key.
+    let kept = std::fs::read(&secret).unwrap();
+    std::fs::remove_file(&secret).unwrap();
+    let e = open().await.use_checkpoint_key(true).await.unwrap_err();
+    assert!(e.to_string().contains("restore it from a backup"), "{e}");
+    assert!(!secret.exists());
+    let o = tenbri(&keys, &["checkpoint", st], "");
+    assert_eq!(o.status.code(), Some(2), "{}", out(&o));
+    std::fs::write(&secret, kept).unwrap();
+
+    let w = TestWitness::new("witness.test/cli", [3; 32]);
+    w.add_log(stream, ck.verifying_key());
+    let (status, _, line) = w.add_checkpoint(&request(0, &[], &note), 1_790_000_000);
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&line));
+    let cosigs = s.join(checkpoint::cosignatures_dir(size));
+    std::fs::create_dir_all(&cosigs).unwrap();
+    std::fs::write(cosigs.join(format!("{}.sig", w.witness().key_id())), line).unwrap();
+
+    let file = t.join("receipt.json");
+    let f = file.to_str().unwrap();
+    let o = tenbri(
+        &keys,
+        &["receipt", "create", st, "--entry", id, "--out", f],
+        "",
+    );
+    assert!(o.status.success(), "{}", out(&o));
+    let vkey = w.witness().vkey();
+    let o = tenbri(
+        &keys,
+        &["receipt", "verify", f, "--key", &fp, "--witness", &vkey],
+        "",
+    );
+    assert!(o.status.success(), "{}", out(&o));
+    assert!(
+        out(&o).contains("cosigned by witness witness.test/cli"),
+        "{}",
+        out(&o)
+    );
+
+    let other = TestWitness::new("witness.test/other", [4; 32])
+        .witness()
+        .vkey();
+    let args = [
+        "receipt",
+        "verify",
+        f,
+        "--key",
+        &fp,
+        "--witness",
+        &vkey,
+        "--witness",
+        &other,
+    ];
+    let o = tenbri(&keys, &args, "");
+    assert_eq!(o.status.code(), Some(1), "{}", out(&o));
+    assert!(out(&o).contains("unwitnessed"), "{}", out(&o));
+    // The same witness pinned twice is one witness.
+    let twice = [
+        "receipt",
+        "verify",
+        f,
+        "--key",
+        &fp,
+        "--witness",
+        &vkey,
+        "--witness",
+        &vkey,
+    ];
+    let o = tenbri(&keys, &twice, "");
+    assert_eq!(o.status.code(), Some(1), "{}", out(&o));
+    assert!(out(&o).contains("unwitnessed"), "{}", out(&o));
+    let mut one = args.to_vec();
+    one.extend(["--witnesses", "1"]);
+    assert!(tenbri(&keys, &one, "").status.success());
+    let _ = std::fs::remove_dir_all(&t);
+}
