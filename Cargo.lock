@@ -3392,11 +3392,11 @@ dependencies = [
 
 [[package]]
 name = "tenbri"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 
 [[package]]
 name = "tenbri-anchor"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "cms",
  "der",
@@ -3417,7 +3417,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-bindings"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "reqwest 0.13.5",
  "serde",
@@ -3436,7 +3436,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-cli"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "clap",
  "serde",
@@ -3457,7 +3457,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-core"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "ed25519-dalek",
  "proptest",
@@ -3468,7 +3468,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-crypt"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.4.3",
@@ -3488,11 +3488,11 @@ dependencies = [
 
 [[package]]
 name = "tenbri-export"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 
 [[package]]
 name = "tenbri-index"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -3513,7 +3513,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-keys"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "cryptoki",
  "getrandom 0.4.3",
@@ -3527,15 +3527,15 @@ dependencies = [
 
 [[package]]
 name = "tenbri-macros"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 
 [[package]]
 name = "tenbri-mcp"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 
 [[package]]
 name = "tenbri-merkle"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "proptest",
  "serde_json",
@@ -3545,7 +3545,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-node"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "napi",
  "napi-build",
@@ -3556,7 +3556,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-otlp"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "opentelemetry",
  "tenbri-core",
@@ -3564,7 +3564,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-proxy"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -3579,7 +3579,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-py"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "pyo3",
  "tenbri-bindings",
@@ -3588,7 +3588,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-schema"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -3598,7 +3598,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-server"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "axum",
  "clap",
@@ -3634,7 +3634,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-store"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "async-trait",
  "fs4",
@@ -3647,11 +3647,11 @@ dependencies = [
 
 [[package]]
 name = "tenbri-stream"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 
 [[package]]
 name = "tenbri-testkit"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
@@ -3666,11 +3666,11 @@ dependencies = [
 
 [[package]]
 name = "tenbri-tiles"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 
 [[package]]
 name = "tenbri-wasm"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "js-sys",
  "serde_json",
@@ -3682,7 +3682,7 @@ dependencies = [
 
 [[package]]
 name = "tenbri-writer"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 dependencies = [
  "getrandom 0.4.3",
  "serde_json",
