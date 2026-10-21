@@ -18,6 +18,27 @@ pub fn hash(line: &str) -> Hash {
 
 const T0: i64 = 1_792_000_000_000;
 
+/// A c2sp.org/tlog-cosignature line (Ed25519 `cosignature/v1`) by `k` named `name` over note text
+/// `text`, at 1792000000, spelled out so the vector examples need no feature.
+pub fn cosignature(text: &str, name: &str, k: &SigningKey) -> String {
+    use tenbri_core::sign::Signer;
+    const T: u64 = 1_792_000_000;
+    let mut id = name.as_bytes().to_vec();
+    id.extend([b'\n', 0x04]);
+    id.extend(k.verifying_key().as_bytes());
+    let id = encoding::prefixed::<32>(&sha256(&id), "sha256:").unwrap();
+    let mut sig = id[..4].to_vec();
+    sig.extend(T.to_be_bytes());
+    sig.extend(
+        k.sign(format!("cosignature/v1\ntime {T}\n{text}").as_bytes())
+            .to_bytes(),
+    );
+    format!(
+        "\u{2014} {name} {}\n",
+        tenbri_merkle::checkpoint::base64(&sig)
+    )
+}
+
 /// A stream: genesis by `stream:a`, session `sess:a1` (key `s1`) certified at seq 2.
 #[derive(Clone)]
 pub struct Stream {
@@ -79,6 +100,15 @@ impl Stream {
         let mut e: Entry = serde_json::from_value(j).unwrap();
         let line = String::from_utf8(sign_entry(&mut e, k).unwrap()).unwrap();
         self.lines.push(line);
+    }
+
+    /// Certifies `ck` as the stream's checkpoint key (spec/checkpoints.md, section 6), in the
+    /// `ext` of the stream key's certificate for session `sess:w` (key `sw`).
+    pub fn certify_checkpoint_key(&mut self, ck: &SigningKey) {
+        let mut e = self.certify("sess:w", &key("sw"), "session");
+        e["ext"] = json!({"checkpoint_key": encode_key(&ck.verifying_key())});
+        let a = self.a.clone();
+        self.push(e, &a, "stream:a");
     }
 
     /// A note signed by `sess:a1`, told apart by `n`.

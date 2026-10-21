@@ -3,9 +3,9 @@
 
 use serde_json::Value as J;
 use tenbri_core::sign::decode_key;
-use tenbri_merkle::Note;
 use tenbri_merkle::checkpoint::unbase64;
-use tenbri_merkle::witness::{Witness, cosignatures, log_vkey, parse_request};
+use tenbri_merkle::witness::{self, Witness, cosignatures, log_vkey, parse_request};
+use tenbri_merkle::{Note, receipt};
 
 fn load() -> J {
     let path = concat!(
@@ -60,6 +60,45 @@ fn cosignature_cases() {
             (J::Null, Err(e)) => assert_eq!(e.code.as_str(), c["result"]["error"], "{name}"),
             (_, got) => panic!("{name}: {got:?}"),
         }
+    }
+}
+
+fn result(got: Result<Vec<tenbri_merkle::witness::Cosigned>, tenbri_core::Error>) -> J {
+    match got {
+        Ok(c) => {
+            serde_json::json!({"ok": c.iter().map(|c| serde_json::json!({"name": c.name, "time": c.time})).collect::<Vec<_>>()})
+        }
+        Err(e) => serde_json::json!({"error": e.code.as_str()}),
+    }
+}
+
+fn pinned(c: &J) -> Vec<Witness> {
+    c["witnesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| Witness::parse(v.as_str().unwrap()).unwrap())
+        .collect()
+}
+
+#[test]
+fn receipts() {
+    for c in load()["receipts"].as_array().unwrap() {
+        let r = c["receipt"].as_str().unwrap().as_bytes();
+        // A format v1 verifier accepts every one: the extra lines are ignored.
+        let v = receipt::verify(r, c["pin"].as_str().unwrap()).unwrap();
+        let got = witness::verify(&v, &pinned(c), c["need"].as_u64().unwrap() as usize);
+        assert_eq!(result(got), c["result"], "{}", c["name"]);
+    }
+}
+
+#[test]
+fn third_party() {
+    for c in load()["third_party"].as_array().unwrap() {
+        let w = Witness::parse(c["witness"].as_str().unwrap()).unwrap();
+        let (text, line) = (c["text"].as_str().unwrap(), c["line"].as_str().unwrap());
+        assert_eq!(w.verify_line(text, line), c["time"].as_u64());
+        assert_eq!(w.verify_line(&text.replace("12010", "12011"), line), None);
     }
 }
 

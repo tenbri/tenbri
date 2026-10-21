@@ -314,6 +314,18 @@ fn streams(base: &Stream) -> J {
     );
     rev.push(json!({"kind": "note"}), &s2, "sess:a2");
 
+    // A witnessed stream (Experimental, section 6): its checkpoint key certified at seq 15, the
+    // checkpoint signed by the session key and the checkpoint key, and cosigned. A format v1
+    // verifier ignores both extra lines.
+    let mut witnessed = base.clone();
+    let ck = key("checkpoint");
+    witnessed.certify_checkpoint_key(&ck);
+    let wcp = Checkpoint::new(&witnessed.id, &witnessed.hashes());
+    let mut wnote = wcp.sign_with(&[s1, &ck]);
+    wnote.extend(
+        common::cosignature(&wcp.text(), "witness.example/w1", &key("witness1")).as_bytes(),
+    );
+
     let cases = vec![
         stream_case("checkpoint-at-head", base, &at(base, 14, s1)),
         stream_case("checkpoint-behind-head", base, &cp10),
@@ -347,6 +359,7 @@ fn streams(base: &Stream) -> J {
             &rev,
             &at(&rev, 6, &s2),
         ),
+        stream_case("witnessed-stream", &witnessed, &wnote),
     ];
     json!(cases)
 }

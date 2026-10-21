@@ -158,6 +158,17 @@ struct Lane {
     witnessed: std::sync::Mutex<HashMap<String, u64>>,
 }
 
+/// What a witness did with a stream's latest checkpoint ([`Daemon::witness`]).
+#[cfg(feature = "witness")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Witnessed {
+    /// It cosigned: the store key of the cosignature.
+    Cosigned(String),
+    /// It refused a checkpoint that contradicts one it cosigned, or holds one beyond this
+    /// stream: the stream was rewritten or truncated, or a different history was shown to it.
+    Fork(String),
+}
+
 /// ponytail: every entry in memory, by position (`seq - 1`) and id, verified, for get, tail and
 /// idempotent replays; queries go through tenbri-index. Serve those from the store when streams
 /// outgrow memory.
@@ -537,21 +548,26 @@ impl Daemon {
     }
 
     /// Sends the latest checkpoint of every stream to each witness `[witness]` names, unless it
-    /// has its cosignature already; what [`Daemon::witness_every`] runs. Returns the store keys of
-    /// the cosignatures written.
+    /// has its cosignature already; what [`Daemon::witness_every`] runs. Returns what each
+    /// witness did that changed something: a cosignature written, or a fork it refused. Other
+    /// failures (a witness down, a timeout) are logged and retried on the next round.
     #[cfg(feature = "witness")]
-    pub async fn witness(&self, witnesses: &[WitnessUrl]) -> Vec<String> {
-        let mut written = vec![];
+    pub async fn witness(&self, witnesses: &[WitnessUrl]) -> Vec<Witnessed> {
+        let mut out = vec![];
         for lane in self.lanes.values() {
             for w in witnesses {
                 match lane.witness(&w.url, &w.vkey).await {
-                    Ok(Some(k)) => written.push(k),
+                    Ok(Some(Witnessed::Fork(detail))) => {
+                        eprintln!("tenbrid: stream {}: FORK: {detail}", lane.name);
+                        out.push(Witnessed::Fork(detail));
+                    }
+                    Ok(Some(c)) => out.push(c),
                     Ok(None) => {}
                     Err(e) => eprintln!("tenbrid: stream {}: witnessing: {e}", lane.name),
                 }
             }
         }
-        written
+        out
     }
 
     /// Runs [`Daemon::witness`] every `every_s` until shutdown, if `[witness]` is configured.
@@ -634,8 +650,6 @@ impl Lane {
                     )
                 })?,
         };
-        #[cfg(feature = "witness")]
-        let checkpoint_key = ks.checkpoint_key();
         let mut writer = Writer::open(store.clone(), Some(&pin))
             .await
             .map_err(|e| e.to_string())?
@@ -649,20 +663,20 @@ impl Lane {
                 false
             }
         };
+        #[cfg(feature = "witness")]
         if writable && witnessed {
-            #[cfg(feature = "witness")]
-            {
-                let key = checkpoint_key.map_err(|e| format!("checkpoint key: {e}"))?;
-                eprintln!(
-                    "tenbrid: stream {name}: witnesses verify its checkpoints with {}",
-                    tenbri_merkle::witness::log_vkey(&head.stream, &key.verifying_key())
-                );
-                writer
-                    .use_checkpoint_key(key)
-                    .await
-                    .map_err(|e| format!("checkpoint key: {e}"))?;
-            }
+            let key = writer
+                .use_checkpoint_key(true)
+                .await
+                .map_err(|e| format!("checkpoint key: {e}"))?
+                .expect("made when missing");
+            eprintln!(
+                "tenbrid: stream {name}: witnesses verify its checkpoints with {}",
+                tenbri_merkle::witness::log_vkey(&head.stream, &key.verifying_key())
+            );
         }
+        #[cfg(not(feature = "witness"))]
+        let _ = witnessed;
         // One store per stream for the life of the process; the reader borrows it.
         let leaked: &'static AnyStore = Box::leak(Box::new(store.clone()));
         let query_index =
@@ -1058,7 +1072,7 @@ impl Lane {
     /// checkpoint. `None` if there is no checkpoint, or it has that cosignature already.
     ///
     /// ponytail: reads the whole stream for the proof; the lane's reader's hashes when that is slow.
-    async fn witness(&self, url: &str, vkey: &str) -> std::io::Result<Option<String>> {
+    async fn witness(&self, url: &str, vkey: &str) -> std::io::Result<Option<Witnessed>> {
         use tenbri_anchor::witness::{Added, add_checkpoint};
         let w = tenbri_merkle::witness::Witness::parse(vkey).map_err(std::io::Error::other)?;
         let Some((size, note)) = tenbri_writer::latest_checkpoint(&self.store).await? else {
@@ -1085,14 +1099,20 @@ impl Lane {
                         .lock()
                         .expect("lock")
                         .insert(vkey.into(), size);
-                    return Ok(Some(key));
+                    return Ok(Some(Witnessed::Cosigned(key)));
                 }
                 Added::Conflict(n) if n <= size && n != old => old = n,
                 Added::Conflict(n) => {
-                    return Err(std::io::Error::other(format!(
-                        "witness {} cosigned size {n}, beyond this stream's checkpoint at {size}: a fork, or a truncated stream",
+                    return Ok(Some(Witnessed::Fork(format!(
+                        "witness {} cosigned size {n}, beyond this stream's checkpoint at {size}",
                         w.name
-                    )));
+                    ))));
+                }
+                Added::Fork(why) => {
+                    return Ok(Some(Witnessed::Fork(format!(
+                        "witness {} refused the checkpoint at size {size} as inconsistent with size {old} it cosigned: {why}",
+                        w.name
+                    ))));
                 }
             }
         }

@@ -11,8 +11,8 @@ use common::key;
 use serde_json::json;
 use tenbri_core::sign::encode_key;
 use tenbri_merkle::checkpoint::{base64, unbase64};
-use tenbri_merkle::witness::{Witness, cosign, cosignatures, log_vkey, request};
-use tenbri_merkle::{Checkpoint, Hash, Note};
+use tenbri_merkle::witness::{self, Witness, cosign, cosignatures, log_vkey, request};
+use tenbri_merkle::{Checkpoint, Hash, Note, receipt};
 
 const T: u64 = 1_792_000_000;
 
@@ -48,8 +48,14 @@ fn main() {
         line(&a)
     };
 
-    let case = |name: &str, extra: &str, pinned: &[&Witness], need: usize| {
-        let note = format!("{signed}{extra}");
+    // Another history of the same size, signed by the same keys: a split view.
+    let mut forked_leaves = leaves.clone();
+    forked_leaves[9] = [0xff; 32];
+    let forked =
+        String::from_utf8(Checkpoint::new(origin, &forked_leaves).sign_with(&[&session, &ck]))
+            .unwrap();
+    let case_on = |name: &str, base: &str, extra: &str, pinned: &[&Witness], need: usize| {
+        let note = format!("{base}{extra}");
         let ws: Vec<Witness> = pinned.iter().map(|w| (*w).clone()).collect();
         let result = match cosignatures(&Note::parse(note.as_bytes()).unwrap(), &ws, need) {
             Ok(c) => {
@@ -58,6 +64,9 @@ fn main() {
             Err(e) => json!({"error": e.code.as_str()}),
         };
         json!({"name": name, "note": note, "witnesses": ws.iter().map(Witness::vkey).collect::<Vec<_>>(), "need": need, "result": result})
+    };
+    let case = |name: &str, extra: &str, pinned: &[&Witness], need: usize| {
+        case_on(name, &signed, extra, pinned, need)
     };
     let cases = vec![
         case("one-of-one", &c1, &[&w1], 1),
@@ -68,7 +77,77 @@ fn main() {
         case("unpinned-witness", &c2, &[&w1], 1),
         case("changed-signature", &forged, &[&w1], 1),
         case("changed-time", &swapped, &[&w1], 1),
+        case_on("split-view", &forked, &c1, &[&w1], 1),
+        case("same-witness-pinned-twice", &c1, &[&w1, &w1], 2),
+        case(
+            "second-line-by-witness-bad",
+            &format!("{c1}{forged}"),
+            &[&w1],
+            1,
+        ),
     ];
+
+    // Receipts of a witnessed stream, checked by `witness::verify`: the checkpoint key's line too.
+    let mut st = common::Stream::new();
+    st.note(0);
+    st.certify_checkpoint_key(&ck);
+    st.note(1);
+    let scp = Checkpoint::new(&st.id, &st.hashes());
+    let snote = String::from_utf8(scp.sign_with(&[&st.s1, &ck])).unwrap()
+        + &cosign(&w1.name, &w1k, &scp.text(), T);
+    let lines: Vec<(u64, &[u8])> = (1..=st.lines.len() as u64)
+        .filter(|&q| q != 3) // the key history (1, 2, 4) and note 1 (5)
+        .map(|q| (q, st.lines[q as usize - 1].as_bytes()))
+        .collect();
+    let receipt_of = |note: &str| {
+        String::from_utf8(receipt::build(note.as_bytes(), &st.hashes(), &lines, &[]).unwrap())
+            .unwrap()
+    };
+    // The checkpoint key's line (the second) with one bit of its signature flipped.
+    let bad_ck = {
+        let mut ls: Vec<String> = snote.lines().map(str::to_owned).collect();
+        let (head, b64) = ls[5].rsplit_once(' ').unwrap();
+        let mut b = unbase64(b64).unwrap();
+        b[40] ^= 1;
+        ls[5] = format!("{head} {}", base64(&b));
+        ls.join("\n") + "\n"
+    };
+    let pin = tenbri_core::sign::fingerprint(&st.a.verifying_key());
+    let rcase = |name: &str, note: &str, pinned: &[&Witness], need: usize| {
+        let r = receipt_of(note);
+        let ws: Vec<Witness> = pinned.iter().map(|w| (*w).clone()).collect();
+        let v = receipt::verify(r.as_bytes(), &pin).expect("a format v1 verifier accepts it");
+        let result = match witness::verify(&v, &ws, need) {
+            Ok(c) => {
+                json!({"ok": c.iter().map(|c| json!({"name": c.name, "time": c.time})).collect::<Vec<_>>()})
+            }
+            Err(e) => json!({"error": e.code.as_str()}),
+        };
+        json!({"name": name, "pin": pin, "receipt": r, "witnesses": ws.iter().map(Witness::vkey).collect::<Vec<_>>(), "need": need, "result": result})
+    };
+    let receipts = vec![
+        rcase("witnessed", &snote, &[&w1], 1),
+        rcase("checkpoint-key-line-changed", &bad_ck, &[&w1], 1),
+        rcase("witnessed-not-required", &snote, &[], 0),
+    ];
+
+    // An independent implementation's cosignature: Geomys's public witness (Go, torchwood) over
+    // a checkpoint of markovianprotocol.com/log, read from its monitoring endpoint on 2026-10-22.
+    let third_party = json!({
+        "source": "https://witness.navigli.skylight.geomys.org/<sha256(origin)>/checkpoint, 2026-10-22",
+        "witness": "witness.navigli.sunlight.geomys.org+a3e00fe2+BNy/co4C1Hn1p+INwJrfUlgz7W55dSZReusH/GhUhJ/G",
+        "text": "markovianprotocol.com/log\n12010\n1jyFVBlENG+Ifo14JNOZDJQ+OeTNaxJx70uRB8VR5Gw=\n",
+        "line": "\u{2014} witness.navigli.sunlight.geomys.org o+AP4gAAAABq2S2uIY6RokCS5VsIp5vWJZCzC8t/rkm75Z3yf9ATMgNQr0TzK0MXM6z/h8Q6JCpBzCgTpks4GIknoNJunhYwC+oRAw==\n",
+    });
+    let tp = Witness::parse(third_party["witness"].as_str().unwrap()).unwrap();
+    let time = tp
+        .verify_line(
+            third_party["text"].as_str().unwrap(),
+            third_party["line"].as_str().unwrap(),
+        )
+        .expect("Geomys's cosignature verifies");
+    let mut third_party = third_party;
+    third_party["time"] = json!(time);
     let request = |old: u64, proof: &[Hash]| {
         let body = String::from_utf8(request(old, proof, signed.as_bytes())).unwrap();
         json!({"old": old, "proof": proof.iter().map(|h| base64(h)).collect::<Vec<_>>(), "body": body})
@@ -82,6 +161,8 @@ fn main() {
         ],
         "checkpoint_key_ext": {"checkpoint_key": encode_key(&ck.verifying_key())},
         "cosignatures": cases,
+        "receipts": receipts,
+        "third_party": [third_party],
         "requests": [request(0, &[]), request(7, &proof)],
     });
     let mut s = serde_json::to_string_pretty(&out).unwrap();

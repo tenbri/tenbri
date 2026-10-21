@@ -1395,16 +1395,11 @@ async fn open_writer(store: AnyStore, ks: KeyStore) -> Result<Writer<AnyStore, C
         .await?
         .with_checkpoints(Some(ks.dir().join(CHECKPOINT_FILE)))
         .await?;
-    #[cfg(feature = "witness")]
-    let witnessed = ks.dir().join(tenbri_keys::CHECKPOINT_KEY_FILE).exists();
-    #[cfg(feature = "witness")]
-    let ck = witnessed.then(|| ks.checkpoint_key()).transpose()?;
     w.use_keys(ks).await?;
-    // A stream witnessed through tenbrid: checkpoints made here are signed for witnesses too.
+    // A stream whose checkpoint key tenbrid certified: checkpoints made here are signed for
+    // witnesses too. The CLI never certifies one.
     #[cfg(feature = "witness")]
-    if let Some(k) = ck {
-        w.use_checkpoint_key(k).await?;
-    }
+    w.use_checkpoint_key(false).await?;
     Ok(w)
 }
 

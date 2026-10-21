@@ -135,6 +135,19 @@ fn main() {
     let short_note = Checkpoint::new(&s.id, &s.hashes()[..n - 1]).sign(&s.s1);
     let wrong_pin = fingerprint(&key("b").verifying_key());
 
+    // A witnessed stream (Experimental): its checkpoint key certified at seq 10, the checkpoint
+    // signed by the session key and the checkpoint key, and cosigned by a witness. A format v1
+    // verifier ignores both extra lines.
+    let mut witnessed = s.clone();
+    let ck = key("checkpoint");
+    witnessed.certify_checkpoint_key(&ck);
+    let wcp = Checkpoint::new(&witnessed.id, &witnessed.hashes());
+    let mut wnote = wcp.sign_with(&[&s.s1, &ck]);
+    wnote.extend(
+        common::cosignature(&wcp.text(), "witness.example/w1", &key("witness1")).as_bytes(),
+    );
+    let valid_witnessed = build(&witnessed, &wnote, n + 1, &[4], &[]);
+
     let cases: Vec<(&str, &str, Vec<u8>)> = vec![
         ("valid", &pin, valid.clone()),
         ("valid-several-entries", &pin, make(&s, n, &[3, 4], &[])),
@@ -254,6 +267,7 @@ fn main() {
             edit(&valid, |j| j["note"] = json!("hello")),
         ),
         ("unknown-version", &pin, edit(&valid, |j| j["v"] = json!(2))),
+        ("valid-witnessed", &pin, valid_witnessed),
     ];
 
     let expected = [
@@ -286,6 +300,7 @@ fn main() {
         ("tsa-token-time-changed", Some("bad_timestamp")),
         ("unknown-member", Some("bad_receipt")),
         ("unknown-version", Some("bad_receipt")),
+        ("valid-witnessed", None),
     ];
 
     let mut out = vec![];

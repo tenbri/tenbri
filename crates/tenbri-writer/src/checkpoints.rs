@@ -97,18 +97,54 @@ impl<S: Store> Writer<S, Checkpoints> {
 
 #[cfg(feature = "witness")]
 impl<S: Store> Writer<S, Checkpoints> {
-    /// Signs every checkpoint with `key`, the stream's checkpoint key, too: the one key witnesses
-    /// verify checkpoints with (spec/checkpoints.md, section 6). If the stream's checkpoint key
-    /// is another one, or none, first certifies `key` in the `ext` of a new session key's
-    /// certificate, signed by the stream key from the key store [`Writer::use_keys`] set.
-    pub async fn use_checkpoint_key(&mut self, key: SigningKey) -> Result<(), WriteError> {
+    /// Signs every checkpoint with the stream's checkpoint key too, the one key witnesses verify
+    /// checkpoints with (spec/checkpoints.md, section 6), from the key store [`Writer::use_keys`]
+    /// set, and writes a checkpoint at once so witnesses have one it signed. Returns the key, or
+    /// `None` when the stream certifies none and `create` is false (the stream is not witnessed).
+    ///
+    /// With `create`, a stream that certifies no checkpoint key gets a new one, certified in the
+    /// `ext` of a new session key's certificate, signed by the stream key. A stream that
+    /// certifies one whose secret is not in the key store, or is another key, fails: witnesses
+    /// know only the certified key, so it is never replaced silently.
+    pub async fn use_checkpoint_key(
+        &mut self,
+        create: bool,
+    ) -> Result<Option<SigningKey>, WriteError> {
         use tenbri_merkle::witness;
+        let keys = self
+            .keys
+            .clone()
+            .ok_or_else(|| WriteError::NoSession("no key store holds the checkpoint key".into()))?;
         let mut r = crate::Reader::new(&self.store, self.pin.as_deref());
-        let entries = r.poll().await?;
-        if witness::checkpoint_key(&entries, u64::MAX) != Some(key.verifying_key()) {
-            let keys = self.keys.clone().ok_or_else(|| {
-                WriteError::NoSession("no key store to certify the checkpoint key from".into())
-            })?;
+        let certified = witness::checkpoint_key(&r.poll().await?, u64::MAX);
+        let file = || {
+            keys.dir()
+                .join(tenbri_keys::CHECKPOINT_KEY_FILE)
+                .display()
+                .to_string()
+        };
+        let key = match (keys.checkpoint_key(), certified) {
+            (Ok(k), Some(c)) if k.verifying_key() == c => k,
+            (Ok(_), Some(c)) => {
+                return Err(WriteError::NoSession(format!(
+                    "{} is not the checkpoint key the stream certified ({}): restore that one",
+                    file(),
+                    tenbri_core::sign::encode_key(&c)
+                )));
+            }
+            (Err(e), Some(c)) => {
+                return Err(WriteError::NoSession(format!(
+                    "the stream certified checkpoint key {}, but {}: {e}; restore it from a backup (witnesses know only that key)",
+                    tenbri_core::sign::encode_key(&c),
+                    file()
+                )));
+            }
+            (_, None) if !create => return Ok(None),
+            (Ok(k), None) => k,
+            (Err(e), None) if e.kind() == io::ErrorKind::NotFound => keys.new_checkpoint_key()?,
+            (Err(e), None) => return Err(e.into()),
+        };
+        if certified.is_none() {
             let stream_key = self.load_stream_key(&keys)?;
             let session = tenbri_keys::Key::new_session(
                 self.clock.now_ms(),
@@ -125,8 +161,10 @@ impl<S: Store> Writer<S, Checkpoints> {
             self.write(e, &stream_key, &session).await?;
             self.session = Some(session);
         }
-        self.hook.key = Some(key);
-        Ok(())
+        self.hook.key = Some(key.clone());
+        // Covers the certificate just written, if any: the first checkpoint witnesses can verify.
+        self.checkpoint().await?;
+        Ok(Some(key))
     }
 }
 

@@ -10,7 +10,7 @@ use tenbri_anchor::witness::{Added, add_checkpoint};
 use tenbri_core::Code;
 use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
 use tenbri_merkle::{Checkpoint, receipt, witness};
-use tenbri_server::{Config, Daemon, Op, WitnessUrl};
+use tenbri_server::{Config, Daemon, Op, WitnessUrl, Witnessed};
 use tenbri_store::LocalStore;
 use tenbri_writer::{Writer, new_id, now_ms};
 
@@ -77,7 +77,10 @@ async fn witnessed_receipts_and_forks() {
     let written = daemon.witness(&witnesses).await;
     assert_eq!(
         written,
-        vec![format!("cosignatures/{size:012}/{}.sig", pinned.key_id())]
+        vec![Witnessed::Cosigned(format!(
+            "cosignatures/{size:012}/{}.sig",
+            pinned.key_id()
+        ))]
     );
     assert!(daemon.witness(&witnesses).await.is_empty());
     assert_eq!(w.size(&id), Some(size));
@@ -111,12 +114,40 @@ async fn witnessed_receipts_and_forks() {
     let session = Key::new_session(now_ms(), SESSION_LIFETIME_MS).unwrap();
     let forked: Vec<[u8; 32]> = (0..size).map(|i| [i as u8 + 1; 32]).collect();
     let note = Checkpoint::new(&id, &forked).sign_with(&[&session.signing, &ck]);
-    let e = add_checkpoint(&url, &pinned, size, &[], &note)
+    let r = add_checkpoint(&url, &pinned, size, &[], &note)
         .await
-        .unwrap_err();
-    assert!(e.to_string().contains("422"), "{e}");
+        .unwrap();
+    assert!(matches!(r, Added::Fork(_)), "{r:?}");
     // ...and from scratch, the witness says where it is.
     let r = add_checkpoint(&url, &pinned, 0, &[], &note).await.unwrap();
     assert_eq!(r, Added::Conflict(size));
+
+    // tenbrid's own fork paths. The witness holds another history at the size it cosigned: the
+    // next checkpoint's proof does not reach its root (422).
+    let append = |id: String| {
+        let (daemon, token) = (&daemon, &token);
+        async move {
+            let draft = br#"{"action": {"type": "reply_ticket", "target": "t:2"}}"#;
+            daemon
+                .append(token, "support", Op::Intent, Some(&id), draft, None)
+                .await
+                .unwrap();
+            daemon.receipt(token, "support", &id).await.unwrap();
+        }
+    };
+    append(new_id(now_ms()).unwrap()).await;
+    w.set_latest(&id, size, [7; 32]);
+    let r = daemon.witness(&witnesses).await;
+    assert!(
+        matches!(&r[..], [Witnessed::Fork(d)] if d.contains("inconsistent")),
+        "{r:?}"
+    );
+    // It holds a checkpoint beyond the stream: a truncation, or a fork (409 above the size).
+    w.set_latest(&id, 1000, [7; 32]);
+    let r = daemon.witness(&witnesses).await;
+    assert!(
+        matches!(&r[..], [Witnessed::Fork(d)] if d.contains("beyond")),
+        "{r:?}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -41,7 +41,13 @@ tenbrid: stream support: witnesses verify its checkpoints with tnb1:170241c12e87
 
 That line is the stream's **vkey**. Its origin is the stream id. Back up `checkpoint.secret` with
 the stream key: witnesses never change the key they hold for a log, so losing it means
-registering the stream again under a new key.
+registering the stream again under a new key. If the secret is missing once the stream has certified a
+checkpoint key, tenbrid and `tenbri` refuse to write to the stream until you restore it; neither
+makes a replacement. The CLI never makes a checkpoint key; it signs with one tenbrid certified.
+
+A witness that refuses a checkpoint as inconsistent with one it cosigned is logged as
+`tenbrid: stream <name>: FORK: …`: the stream was rewritten or truncated, or another history was
+shown to that witness. Investigate before anything else.
 
 Cosignatures are stored next to the checkpoint, as `cosignatures/<size>/<witness key ID>.sig`, and
 go into every receipt made from that checkpoint.
@@ -56,7 +62,8 @@ tenbri receipt verify receipt.json --key sha256:… \
 ```
 
 `--witnesses N` is how many of the pinned witnesses must have cosigned (all of them by default).
-Too few, or a cosignature that does not verify, fails with `unwitnessed` and exit code 1.
+Witnesses count by name: one pinned twice counts once. Too few, or a cosignature that does not
+verify, fails with `unwitnessed` and exit code 1.
 
 ## 3. Register with public witnesses (free)
 

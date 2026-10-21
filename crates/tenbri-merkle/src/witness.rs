@@ -115,27 +115,46 @@ impl Witness {
         vkey(&self.name, COSIGNATURE, &self.key)
     }
 
-    /// `None` if `note` has no cosignature line by this witness; else the time of its cosignature,
-    /// or why it does not verify.
+    /// `None` if `note` has no cosignature line by this witness; else the time of its first
+    /// cosignature line, or why one does not verify: every line under its name and key ID MUST
+    /// verify, as for the log's own signature (spec/checkpoints.md, section 2).
     pub fn cosigned(&self, note: &Note) -> Option<Result<u64, Error>> {
         let id = key_id(&self.name, COSIGNATURE, &self.key);
-        let (_, _, sig) = note
+        let times: Option<Vec<u64>> = note
             .sigs
             .iter()
-            .find(|(n, i, _)| *n == self.name && *i == id)?;
-        Some(
-            <[u8; 72]>::try_from(&sig[..])
-                .ok()
-                .and_then(|s| {
-                    let time = u64::from_be_bytes(s[..8].try_into().expect("8 bytes"));
-                    let sig = Signature::from_bytes(&s[8..].try_into().expect("64 bytes"));
-                    self.key
-                        .verify_strict(message(note.text(), time).as_bytes(), &sig)
-                        .is_ok()
-                        .then_some(time)
-                })
-                .ok_or_else(|| bad(format!("the cosignature by {} does not verify", self.name))),
-        )
+            .filter(|(n, i, _)| *n == self.name && *i == id)
+            .map(|(_, _, sig)| self.check(note.text(), sig))
+            .collect();
+        match times {
+            Some(t) if t.is_empty() => None,
+            Some(t) => Some(Ok(t[0])),
+            None => Some(Err(bad(format!(
+                "a cosignature by {} does not verify",
+                self.name
+            )))),
+        }
+    }
+
+    /// The time of `line`, a cosignature line (`— <name> <base64>`) by this witness over note
+    /// text `text`, if it verifies. Any log's checkpoint: the origin need not be a stream id.
+    pub fn verify_line(&self, text: &str, line: &str) -> Option<u64> {
+        let rest = line.trim_end_matches('\n').strip_prefix("\u{2014} ")?;
+        let (name, sig) = rest.split_once(' ')?;
+        let sig = unbase64(sig).filter(|s| s.len() > 4)?;
+        (name == self.name && sig[..4] == key_id(&self.name, COSIGNATURE, &self.key))
+            .then(|| self.check(text, &sig[4..]))?
+    }
+
+    /// The time in `sig` (timestamp and Ed25519 signature) if it verifies over `text`.
+    fn check(&self, text: &str, sig: &[u8]) -> Option<u64> {
+        let s = <[u8; 72]>::try_from(sig).ok()?;
+        let time = u64::from_be_bytes(s[..8].try_into().expect("8 bytes"));
+        let sig = Signature::from_bytes(&s[8..].try_into().expect("64 bytes"));
+        self.key
+            .verify_strict(message(text, time).as_bytes(), &sig)
+            .is_ok()
+            .then_some(time)
     }
 }
 
@@ -177,14 +196,22 @@ pub fn verify(r: &Verified, witnesses: &[Witness], need: usize) -> Result<Vec<Co
 }
 
 /// The pinned `witnesses` that cosigned `note`: every cosignature by one of them MUST verify, and
-/// at least `need` of them MUST have cosigned (`unwitnessed`).
+/// at least `need` distinct witnesses (by name) MUST have cosigned (`unwitnessed`).
 pub fn cosignatures(
     note: &Note,
     witnesses: &[Witness],
     need: usize,
 ) -> Result<Vec<Cosigned>, Error> {
-    let mut out = vec![];
+    let mut out: Vec<Cosigned> = vec![];
     for w in witnesses {
+        // A witness counts once, whatever keys it was pinned with: a name pinned twice, or with
+        // an old and a new key, is not two witnesses.
+        if out.iter().any(|c| c.name == w.name) {
+            if let Some(Err(e)) = w.cosigned(note) {
+                return Err(e);
+            }
+            continue;
+        }
         if let Some(t) = w.cosigned(note) {
             out.push(Cosigned {
                 name: w.name.clone(),

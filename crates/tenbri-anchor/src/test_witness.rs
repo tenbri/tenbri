@@ -43,6 +43,14 @@ impl TestWitness {
             .insert(origin.to_owned(), (key, 0, root(&[])));
     }
 
+    /// Makes the witness hold `size` and `root` as the last checkpoint of `origin` it cosigned:
+    /// what it would hold had the log shown it another history.
+    pub fn set_latest(&self, origin: &str, size: u64, root: Hash) {
+        if let Some(l) = self.logs.lock().expect("lock").get_mut(origin) {
+            (l.1, l.2) = (size, root);
+        }
+    }
+
     /// The size this witness last cosigned for `origin`.
     pub fn size(&self, origin: &str) -> Option<u64> {
         self.logs.lock().expect("lock").get(origin).map(|l| l.1)

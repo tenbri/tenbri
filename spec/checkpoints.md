@@ -173,7 +173,9 @@ and nothing else (no entry, attestation or HEAD).
   holds `checkpoint_key`, the key as `ed25519:` and 64 lowercase hex digits:
   `"ext": {"checkpoint_key": "ed25519:…"}`. The reference writer puts it on the `certify` of a new
   session key. The checkpoint key in force at seq `n` is the one the last such entry at or before
-  `n` names; certifying another replaces it.
+  `n` names; certifying another replaces it. A writer makes and certifies a checkpoint key only
+  when told to witness the stream (tenbrid's `[witness]`); once one is certified, a writer that
+  cannot load it MUST fail rather than make another, since witnesses know only that key.
 - **Signing.** A witnessed stream's checkpoint carries two signature lines under the origin's name,
   in this order: the session key's (section 2, which every format v1 verifier requires) and the
   checkpoint key's, the same C2SP Ed25519 signature (type `0x01`). A verifier that does not know
@@ -234,7 +236,7 @@ and a number `N`. After the checkpoint's own checks (section 4, or receipts.md, 
 | --- | --- |
 | A signature line by the checkpoint key in force at `size` verifies, if the note has one | `bad_checkpoint` |
 | Every cosignature line whose name and key ID match a pinned witness verifies (strictly) | `unwitnessed` |
-| At least `N` pinned witnesses cosigned | `unwitnessed` |
+| At least `N` distinct pinned witnesses cosigned; a witness is its name, so one pinned twice, or with an old and a new key, counts once | `unwitnessed` |
 
 `T` is the witness's claim, signed by it; a verifier shows it as the witness's time, never as the
 writer's or a TSA's.
