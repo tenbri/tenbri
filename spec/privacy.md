@@ -69,6 +69,15 @@ digest means computing it with each epoch's digest key in turn.
 What the content bytes are is the integration's choice (the document, the policy text, the message),
 fixed per input `ref`; the integration documents it.
 
+Whoever can compute digests holds the key's guess-confirm power: given a digest from the log, they
+can test guessed contents until one matches. tenbrid, which holds the data keys for writers that
+hold only a token, computes digests (`POST /v1/streams/{stream}/digest`) only for tokens configured
+with `digest = true`; tokens default to `false`. Grant it to the writers that pin inputs, not to
+readers. tenbrid makes the tenant's data key on first use but never a subject's: a subject with no
+data key in its key store is refused (TENBRI_NOT_FOUND), so a token cannot fill the key store
+with subjects. An operator makes a subject's first key on tenbrid's host (`tenbri keys rotate
+--subject <handle>`), or a writer holding the keys makes it on first use.
+
 ## 4. Erasure
 
 Erasing a subject deletes every epoch of its data keys from the key store. Then:

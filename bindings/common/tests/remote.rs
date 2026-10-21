@@ -32,7 +32,8 @@ async fn writes_through_tenbrid_without_keys() {
         .unwrap();
     let config = format!(
         "keys = \"keys\"\nindex_dir = \"index\"\n[streams.support]\npath = \"audit\"\n\
-         [[tokens]]\nsha256 = \"{}\"\nprincipal = {{ kind = \"agent\", id = \"support\" }}\n",
+         [[tokens]]\nsha256 = \"{}\"\nprincipal = {{ kind = \"agent\", id = \"support\" }}\n\
+         digest = true\n",
         tenbri_core::sign::sha256(TOKEN.as_bytes())
     );
     let daemon = Arc::new(
@@ -100,5 +101,18 @@ async fn writes_through_tenbrid_without_keys() {
         "two key entries, intent, outcome"
     );
     assert_eq!(v["pinned_key"], stream_key.fingerprint());
-    assert!(s.digest(None, b"x").is_err(), "no data key in the agent");
+    // tenbrid keys the digest with its data key, as the agent would with the keys in hand. It
+    // never makes a subject's key.
+    let e = s.digest(Some("cust_42"), b"x").await.err().unwrap();
+    assert_eq!(e.code, tenbri_bindings::NOT_FOUND);
+    // Made on tenbrid's host (tenbri keys rotate --subject), here directly.
+    let data = tenbri_crypt::DataKeys::open(&ks).unwrap();
+    let expected = data.digest(Some("cust_42"), b"x").unwrap();
+    assert_eq!(s.digest(Some("cust_42"), b"x").await.unwrap(), expected);
+    assert_eq!(
+        s.digest(None, b"x").await.unwrap(),
+        data.digest(None, b"x").unwrap()
+    );
+    let e = s.digest(Some(""), b"x").await.err().unwrap();
+    assert_eq!(e.code, tenbri_bindings::INVALID_REQUEST);
 }

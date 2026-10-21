@@ -136,6 +136,7 @@ test('decision: ok, refused, error, templates, policy and inputs keyed by the ke
     { ref: 'ticket:4512', version: '3', digest: log.digest('refund ch_1', { subject: 'c-42' }) },
   ])
   assert.notEqual(intent.inputs?.[0].digest, log.digest('refund ch_1'))
+  assert.equal(await log.digestAsync('refund ch_1', { subject: 'c-42' }), intent.inputs?.[0].digest)
   assert.ok((await log.verify(log.fingerprint ?? undefined)).ok)
 })
 

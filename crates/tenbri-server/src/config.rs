@@ -28,6 +28,9 @@
 //! sha256 = "sha256:..."            # SHA-256 of the bearer token; the token is never stored
 //! principal = { kind = "agent", id = "support-assistant" }
 //! streams = ["support"]            # default: every stream
+//! digest = true                    # may ask for keyed digests (POST .../digest); default false.
+//!                                  # It holds the data keys' guess-confirm power: whoever holds the
+//!                                  # token can test a guessed input against any digest in the log
 //! ```
 //!
 //! Relative paths are relative to the file's directory. Object stores take their credentials from
@@ -122,6 +125,9 @@ pub struct TokenConfig {
     pub sha256: String,
     pub principal: Principal,
     pub streams: Option<Vec<String>>,
+    /// May use the digest route (spec/privacy.md, section 3); default false.
+    #[serde(default)]
+    pub digest: bool,
 }
 
 fn listen() -> SocketAddr {

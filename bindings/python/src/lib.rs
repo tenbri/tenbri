@@ -172,7 +172,7 @@ impl Stream {
 
     #[pyo3(signature = (subject, content))]
     fn digest(&self, py: Python<'_>, subject: Option<&str>, content: &[u8]) -> PyResult<String> {
-        self.0.digest(subject, content).map_err(|e| raise(py, e))
+        block(py, self.0.digest(subject, content))
     }
 
     fn append(&self, py: Python<'_>, draft: String) -> PyResult<String> {
