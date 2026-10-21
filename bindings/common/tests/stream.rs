@@ -81,6 +81,7 @@ async fn write_verify_query() {
         keys: Some(root.join("elsewhere")),
         key: Some(fp.clone()),
         create: false,
+        ..Options::default()
     };
     let r = Stream::open(&format!("file://{}", path.display()), o)
         .await

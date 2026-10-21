@@ -15,6 +15,10 @@ use tenbri_core::{
 };
 use tenbri_keys::{Backend, Key, KeyStore, SESSION_LIFETIME_MS};
 use tenbri_store::{AnyStore, Store};
+mod remote;
+
+pub use remote::{FORBIDDEN, INTERNAL, SCHEMA_VIOLATION, UNAUTHENTICATED};
+
 use tenbri_writer::{
     CHECKPOINT_FILE, Lane, LaneConfig, ReadError, Reader, WriteError, Writer, draft_from_json,
     now_ms,
@@ -133,12 +137,175 @@ pub struct Options {
     /// The genesis key to pin: a fingerprint (`sha256:…`) or public key (`ed25519:…`). Without
     /// it, writes trust the stream key in `keys`, and verification reports "unpinned".
     pub key: Option<String>,
-    /// Create the stream and its keys if there is none at the location.
+    /// Create the stream and its keys if there is none at the location. Ignored for tenbrid,
+    /// whose configuration names its streams.
     pub create: bool,
+    /// The bearer token for a tenbrid location; default `$TENBRI_TOKEN`.
+    pub token: Option<String>,
 }
 
-/// One stream, open for writing (when this machine holds its keys) and reading.
-pub struct Stream {
+/// One stream, open for writing and reading: on storage this machine holds the keys of, or
+/// through a tenbrid that holds them, so the process writing never sees a signing key.
+pub struct Stream(Inner);
+
+enum Inner {
+    Local(Local),
+    Remote(remote::Remote),
+}
+
+impl Stream {
+    /// Opens the stream at `location`: a directory (or `file://` URL), `s3://bucket/prefix`,
+    /// `r2://bucket/prefix` (credentials from `AWS_*`; `CLOUDFLARE_ACCOUNT_ID` for R2), or a
+    /// tenbrid, `https://host[:port]/<stream>` (`http://` on loopback only) with a bearer token.
+    pub async fn open(location: &str, o: Options) -> Result<Stream, Error> {
+        Ok(Stream(if remote::is_remote(location) {
+            Inner::Remote(remote::Remote::open(location, o.token).await?)
+        } else {
+            Inner::Local(Local::open(location, o).await?)
+        }))
+    }
+
+    /// The stream id, `tnb1:…`.
+    pub fn id(&self) -> &str {
+        match &self.0 {
+            Inner::Local(l) => &l.id,
+            Inner::Remote(r) => r.id(),
+        }
+    }
+
+    /// The genesis key's fingerprint, pinned or as this machine's keys hold it: what verifiers
+    /// should pin. None through tenbrid unless pinned at open: [`Stream::verify`] reports the
+    /// key tenbrid pins.
+    pub fn fingerprint(&self) -> Option<&str> {
+        match &self.0 {
+            Inner::Local(l) => l.fingerprint.as_deref(),
+            Inner::Remote(_) => None,
+        }
+    }
+
+    /// Whether this stream can be written here; through tenbrid, the token decides per write.
+    pub fn writable(&self) -> bool {
+        match &self.0 {
+            Inner::Local(l) => l.lane.lock().expect("lane lock").is_ok(),
+            Inner::Remote(_) => true,
+        }
+    }
+
+    /// The keyed digest of an input, `hmac-sha256:<hex>`, under the data key of `subject` (the
+    /// tenant's without one) from the local key store beside the stream's keys, made on first use:
+    /// erasing the subject's key leaves the digest unconfirmable (spec/privacy.md).
+    pub fn digest(&self, subject: Option<&str>, content: &[u8]) -> Result<String, Error> {
+        match &self.0 {
+            Inner::Local(l) => l.digest(subject, content),
+            // ponytail: tenbrid has no digest route yet; callers pass their own digest key.
+            Inner::Remote(_) => Err(Error::new(
+                NO_SESSION_KEY,
+                "the data keys stay with tenbrid, which does not digest yet: pass a digest key",
+            )),
+        }
+    }
+
+    /// Appends a draft entry (JSON object); returns it as stored (canonical JSON), once durable.
+    pub async fn append(&self, draft: &[u8]) -> Result<String, Error> {
+        self.put(object(draft)?).await
+    }
+
+    /// Records an intent, durable before the action runs. `kind` and `phase` may be left out.
+    pub async fn intent(&self, draft: &[u8]) -> Result<String, Error> {
+        let mut d = object(draft)?;
+        set(&mut d, "kind", "decision")?;
+        set(&mut d, "phase", "intent")?;
+        self.put(d).await
+    }
+
+    /// Records the outcome of `intent` (the intent entry, or `{"id": …}`) with `status`.
+    /// `principal`, `action`, `subject` and `source` default to the intent's.
+    pub async fn outcome(
+        &self,
+        intent: &[u8],
+        status: &str,
+        draft: &[u8],
+    ) -> Result<String, Error> {
+        let intent = object(intent)?;
+        let Some(Value::String(id)) = intent.get("id") else {
+            return Err(Error::new(INVALID_REQUEST, "the intent has no `id`"));
+        };
+        let mut d = object(draft)?;
+        set(&mut d, "kind", "decision")?;
+        set(&mut d, "phase", "outcome")?;
+        set(&mut d, "intent", id)?;
+        set(&mut d, "status", status)?;
+        for k in ["principal", "action", "subject", "source"] {
+            if let (None, Some(v)) = (d.get(k), intent.get(k)) {
+                d.insert(k.into(), v.clone());
+            }
+        }
+        self.put(d).await
+    }
+
+    async fn put(&self, mut d: Map<String, Value>) -> Result<String, Error> {
+        match &self.0 {
+            Inner::Local(l) => l.write(entry(d)?).await,
+            Inner::Remote(r) => {
+                // The id is chosen here, before the write, so a caller can retry with it.
+                match d.get("id") {
+                    None => {
+                        d.insert("id".into(), new_id()?.into());
+                    }
+                    Some(Value::String(id)) if encoding::parse_ulid(id).is_some() => {}
+                    Some(v) => {
+                        return Err(Error::new(
+                            INVALID_REQUEST,
+                            format!("the entry id must be a ULID, not {v}"),
+                        ));
+                    }
+                }
+                r.write(d).await
+            }
+        }
+    }
+
+    /// Waits for every append queued so far. Through tenbrid every append returns durable.
+    pub async fn flush(&self) {
+        if let Inner::Local(l) = &self.0 {
+            l.flush().await;
+        }
+    }
+
+    /// Flushes and stops the writer; later writes fail. Reads still work.
+    pub async fn close(&self) {
+        if let Inner::Local(l) = &self.0 {
+            l.close().await;
+        }
+    }
+
+    /// Checks the whole stream (canonical bytes, chain, signatures, keys, HEAD, latest
+    /// checkpoint) against `key`, else the key pinned at open. Returns a JSON report: `stream`,
+    /// `entries`, `pinned_key` (null when unpinned), `broken` (`{seq, code, message}` or null)
+    /// and `checkpoint` (the size of the latest checkpoint it matched, or null). Through tenbrid,
+    /// tenbrid's own check, against the key it pins (`key`, if given, must be it).
+    pub async fn verify(&self, key: Option<&str>) -> Result<String, Error> {
+        match &self.0 {
+            Inner::Local(l) => l.verify(key).await,
+            Inner::Remote(r) => r.verify(key.map(pin).transpose()?.as_deref()).await,
+        }
+    }
+
+    /// Entries matching `filter` (a JSON [`Filter`]), each as `{verification, entry}`, in
+    /// sequence order: a JSON array. `verification` is `verified`, `unpinned` (no key pinned at
+    /// open) or `broken` (at or after a revocation that reaches back).
+    pub async fn query(&self, filter: &[u8]) -> Result<String, Error> {
+        let f: Filter = serde_json::from_slice(filter)
+            .map_err(|e| Error::new(INVALID_REQUEST, format!("query: {e}")))?;
+        match &self.0 {
+            Inner::Local(l) => l.query(&f).await,
+            Inner::Remote(r) => r.query(&f).await,
+        }
+    }
+}
+
+/// A stream on storage, with this machine's keys.
+struct Local {
     store: AnyStore,
     id: String,
     pin: Option<String>,
@@ -150,10 +317,8 @@ pub struct Stream {
     lane: Mutex<Result<Lane, Error>>,
 }
 
-impl Stream {
-    /// Opens the stream at `location`: a directory (or `file://` URL), or `s3://bucket/prefix`,
-    /// `r2://bucket/prefix` (credentials from `AWS_*`; `CLOUDFLARE_ACCOUNT_ID` for R2).
-    pub async fn open(location: &str, o: Options) -> Result<Stream, Error> {
+impl Local {
+    async fn open(location: &str, o: Options) -> Result<Local, Error> {
         let location = location.strip_prefix("file://").unwrap_or(location);
         let pin = o.key.as_deref().map(pin).transpose()?;
         let keys = o.keys.or_else(tenbri_keys::default_dir);
@@ -211,7 +376,7 @@ impl Stream {
                 return Err(e.clone());
             }
         }
-        Ok(Stream {
+        Ok(Local {
             replicated: matches!(store, AnyStore::Bucket(_)),
             store,
             id: head.stream,
@@ -222,26 +387,10 @@ impl Stream {
         })
     }
 
-    /// The stream id, `tnb1:…`.
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// The genesis key's fingerprint, pinned or as this machine's keys hold it: what verifiers
-    /// should pin.
-    pub fn fingerprint(&self) -> Option<&str> {
-        self.fingerprint.as_deref()
-    }
-
-    /// Whether this stream can be written here.
-    pub fn writable(&self) -> bool {
-        self.lane.lock().expect("lane lock").is_ok()
-    }
-
     /// The keyed digest of an input, `hmac-sha256:<hex>`, under the data key of `subject` (the
     /// tenant's without one) from the local key store beside the stream's keys, made on first use:
     /// erasing the subject's key leaves the digest unconfirmable (spec/privacy.md).
-    pub fn digest(&self, subject: Option<&str>, content: &[u8]) -> Result<String, Error> {
+    fn digest(&self, subject: Option<&str>, content: &[u8]) -> Result<String, Error> {
         let ks = self.keys.as_ref().ok_or_else(|| {
             Error::new(
                 NO_SESSION_KEY,
@@ -259,44 +408,6 @@ impl Stream {
                 }
                 e => Error::new(STORE_UNAVAILABLE, e.to_string()),
             })
-    }
-
-    /// Appends a draft entry (JSON object); returns it as stored (canonical JSON), once durable.
-    pub async fn append(&self, draft: &[u8]) -> Result<String, Error> {
-        self.write(entry(object(draft)?)?).await
-    }
-
-    /// Records an intent, durable before the action runs. `kind` and `phase` may be left out.
-    pub async fn intent(&self, draft: &[u8]) -> Result<String, Error> {
-        let mut d = object(draft)?;
-        set(&mut d, "kind", "decision")?;
-        set(&mut d, "phase", "intent")?;
-        self.write(entry(d)?).await
-    }
-
-    /// Records the outcome of `intent` (the intent entry, or `{"id": …}`) with `status`.
-    /// `principal`, `action`, `subject` and `source` default to the intent's.
-    pub async fn outcome(
-        &self,
-        intent: &[u8],
-        status: &str,
-        draft: &[u8],
-    ) -> Result<String, Error> {
-        let intent = object(intent)?;
-        let Some(Value::String(id)) = intent.get("id") else {
-            return Err(Error::new(INVALID_REQUEST, "the intent has no `id`"));
-        };
-        let mut d = object(draft)?;
-        set(&mut d, "kind", "decision")?;
-        set(&mut d, "phase", "outcome")?;
-        set(&mut d, "intent", id)?;
-        set(&mut d, "status", status)?;
-        for k in ["principal", "action", "subject", "source"] {
-            if let (None, Some(v)) = (d.get(k), intent.get(k)) {
-                d.insert(k.into(), v.clone());
-            }
-        }
-        self.write(entry(d)?).await
     }
 
     async fn write(&self, mut e: Entry) -> Result<String, Error> {
@@ -352,7 +463,7 @@ impl Stream {
     }
 
     /// Waits for every append queued so far.
-    pub async fn flush(&self) {
+    async fn flush(&self) {
         let lane = self.lane.lock().expect("lane lock").clone();
         if let Ok(lane) = lane {
             lane.flush().await;
@@ -360,7 +471,7 @@ impl Stream {
     }
 
     /// Flushes and stops the writer; later writes fail. Reads still work.
-    pub async fn close(&self) {
+    async fn close(&self) {
         self.flush().await;
         *self.lane.lock().expect("lane lock") = Err(Error::new(STORE_UNAVAILABLE, "closed"));
     }
@@ -369,7 +480,7 @@ impl Stream {
     /// checkpoint) against `key`, else the key pinned at open. Returns a JSON report: `stream`,
     /// `entries`, `pinned_key` (null when unpinned), `broken` (`{seq, code, message}` or null)
     /// and `checkpoint` (the size of the latest checkpoint it matched, or null).
-    pub async fn verify(&self, key: Option<&str>) -> Result<String, Error> {
+    async fn verify(&self, key: Option<&str>) -> Result<String, Error> {
         let pin = key.map(pin).transpose()?.or_else(|| self.pin.clone());
         let r = tenbri_writer::verify(&self.store, pin.as_deref()).await?;
         Ok(json!({
@@ -390,9 +501,7 @@ impl Stream {
     /// sequence order: a JSON array. `verification` is `verified`, `unpinned` (no key pinned at
     /// open) or `broken` (at or after a revocation that reaches back).
     // ponytail: replays and checks the whole stream per query; tenbri-index replaces the scan.
-    pub async fn query(&self, filter: &[u8]) -> Result<String, Error> {
-        let f: Filter = serde_json::from_slice(filter)
-            .map_err(|e| Error::new(INVALID_REQUEST, format!("query: {e}")))?;
+    async fn query(&self, f: &Filter) -> Result<String, Error> {
         let mut r = Reader::new(&self.store, self.pin.as_deref());
         let entries = r.poll().await?;
         let broken = r.chain().invalidated().map(|b| b.seq);

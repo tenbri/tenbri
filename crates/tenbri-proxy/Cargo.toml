@@ -7,6 +7,20 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+# ponytail: unpublished while it builds on tenbri-bindings, which is not on crates.io; publish both
+# (or move Stream into tenbri-writer) to ship it with cargo install.
+publish = false
+
+[dependencies]
+serde_json = "1"
+tenbri-bindings = { path = "../../bindings/common" }
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+tenbri-core.workspace = true
+tenbri-keys.workspace = true
+tenbri-store.workspace = true
+tenbri-writer.workspace = true
 
 [lints]
 workspace = true

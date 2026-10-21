@@ -88,7 +88,9 @@ export interface Match {
 
 export declare class Tenbri {
   /** Opens the stream at `url`: a directory, `file://…`, `s3://bucket/prefix` or `r2://bucket/prefix`
-   * (credentials from `AWS_*`; `CLOUDFLARE_ACCOUNT_ID` for R2). */
+   * (credentials from `AWS_*`; `CLOUDFLARE_ACCOUNT_ID` for R2), or a tenbrid, `https://host[:port]/<stream>`
+   * (`http://` on loopback only), with the bearer token in `$TENBRI_TOKEN`: tenbrid holds the keys
+   * and signs, so the agent holds none. */
   static open(url: string | URL, options?: OpenOptions): Promise<Tenbri>
   /** The stream id, `tnb1:…`. */
   readonly id: string
@@ -116,7 +118,7 @@ export declare class Tenbri {
 }
 
 export interface InitOptions {
-  /** The stream: a directory or `s3://bucket/prefix`. Default `$TENBRI_STREAM`. */
+  /** The stream: a directory, `s3://bucket/prefix`, or a tenbrid, `https://host/<stream>`. Default `$TENBRI_STREAM`. */
   stream?: string | URL
   /** The keys directory, apart from the stream. Default `$TENBRI_KEYS`, else `~/.config/tenbri/keys`. */
   keys?: string

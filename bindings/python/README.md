@@ -47,7 +47,7 @@ environment variable:
 
 | Argument | Variable | |
 | --- | --- | --- |
-| `stream` | `TENBRI_STREAM` | A directory, `file://...`, `s3://bucket/prefix` or `r2://bucket/prefix` |
+| `stream` | `TENBRI_STREAM` | A directory, `file://...`, `s3://bucket/prefix`, `r2://bucket/prefix`, or a tenbrid, `https://host/<stream>`, with the token in `TENBRI_TOKEN`: the agent then holds no signing key |
 | `keys` | `TENBRI_KEYS` | The keys directory, apart from the stream; default `~/.config/tenbri/keys` |
 | `agent` | `TENBRI_AGENT` | Who acts when nothing narrower says: `agent:support` |
 | `approver` | `TENBRI_APPROVER` | Who answers the frameworks' approval prompts: `person:alice` |

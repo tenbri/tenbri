@@ -57,6 +57,7 @@ impl Stream {
             keys: o.keys.map(PathBuf::from),
             key: o.key,
             create: o.create.unwrap_or(false),
+            ..Options::default()
         });
         let s = tenbri_bindings::Stream::open(&location, o)
             .await
