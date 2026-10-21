@@ -20,6 +20,8 @@ default = ["keychain", "s3"]
 keychain = ["tenbri-keys/keychain"]
 # Streams in AWS S3, Cloudflare R2 and MinIO (s3:// and r2:// locations).
 s3 = ["tenbri-store/s3"]
+# Experimental, not shipped: stream keys in a PKCS#11 token (`init --pkcs11 --experimental`).
+pkcs11 = ["tenbri-keys/pkcs11", "dep:zeroize"]
 # Witness cosignatures (Experimental): receipt verify --witness.
 witness = ["tenbri-merkle/witness", "tenbri-writer/witness"]
 
@@ -37,6 +39,7 @@ tenbri-schema.workspace = true
 tenbri-store.workspace = true
 tenbri-writer.workspace = true
 tokio = { version = "1", features = ["macros", "rt", "time"] }
+zeroize = { version = "1", optional = true }
 
 [dev-dependencies]
 # Not published: only the test of pins recorded by the SDKs' stream creation uses it.

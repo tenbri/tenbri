@@ -4,13 +4,22 @@
 //! by it, sign everything else (spec/format-v1.md, section 5). [`KeyStore`] keeps both, one
 //! directory per stream, never under the stream's own directory. The secret half sits in a file
 //! (`0600`) or, with the `keychain` feature, in the OS keychain; both keep keys exportable.
+//!
+//! **Experimental**, with the `pkcs11` feature: the stream key in a PKCS#11 token (an HSM, a
+//! YubiHSM, SoftHSM for tests), generated there and never exportable (module `pkcs11`). The
+//! host then holds session keys only: whoever takes it can sign with the token while they are
+//! in, and carries away at most a session key, which expires within 24 hours and can be revoked.
+//! The `external` feature alone gives the seam any signer that keeps its key fits behind
+//! (`External`).
 
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "external")]
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tenbri_core::sign::{SigningKey, encode_key, fingerprint};
+use tenbri_core::sign::{Signature, Signer, SigningKey, VerifyingKey, encode_key, fingerprint};
 use tenbri_core::{Entry, KeyEvent, Kind, Role, encoding};
 use zeroize::Zeroizing;
 
@@ -24,41 +33,109 @@ pub struct Key {
     pub role: Role,
     /// Sessions only: the last timestamp the key may sign at.
     pub not_after: Option<String>,
+    /// The private half. Sign with [`Key::sign`] and read the public half with
+    /// [`Key::verifying_key`]: for a key an external signer keeps, this is a throwaway key whose
+    /// signatures verify against nothing in the stream.
     pub signing: SigningKey,
+    #[cfg(feature = "external")]
+    external: Option<Arc<dyn External>>,
+}
+
+/// **Experimental.** A signer whose secret never leaves it (a hardware token, a KMS): it signs what
+/// it is given.
+#[cfg(feature = "external")]
+pub trait External: Send + Sync {
+    /// Its public key.
+    fn public(&self) -> VerifyingKey;
+    /// A pure Ed25519 signature of `msg` (RFC 8032, not prehashed).
+    fn sign(&self, msg: &[u8]) -> io::Result<Signature>;
 }
 
 impl Key {
+    /// A key held here.
+    pub fn local(id: String, role: Role, not_after: Option<String>, signing: SigningKey) -> Key {
+        Key {
+            id,
+            role,
+            not_after,
+            signing,
+            #[cfg(feature = "external")]
+            external: None,
+        }
+    }
+
     /// A new stream key, with an id derived from it (`stream:<12 hex>`).
     pub fn new_stream() -> io::Result<Key> {
         let signing = generate()?;
-        Ok(Key {
-            id: format!("stream:{}", short(&signing)),
-            role: Role::Stream,
-            not_after: None,
-            signing,
-        })
+        let id = format!("stream:{}", short(&signing));
+        Ok(Key::local(id, Role::Stream, None, signing))
     }
 
     /// A new session key valid from `now_ms` for `lifetime_ms`, id `sess:<date>:<12 hex>`.
     pub fn new_session(now_ms: i64, lifetime_ms: i64) -> io::Result<Key> {
         let signing = generate()?;
         let date = &encoding::format_ts(now_ms)[..10];
+        let id = format!("sess:{date}:{}", short(&signing));
+        let not_after = Some(encoding::format_ts(now_ms + lifetime_ms));
+        Ok(Key::local(id, Role::Session, not_after, signing))
+    }
+
+    /// **Experimental.** A stream key kept by `signer`, with an id derived from its public key.
+    #[cfg(feature = "external")]
+    pub fn external_stream(signer: Arc<dyn External>) -> io::Result<Key> {
+        let public = signer.public();
         Ok(Key {
-            id: format!("sess:{date}:{}", short(&signing)),
-            role: Role::Session,
-            not_after: Some(encoding::format_ts(now_ms + lifetime_ms)),
-            signing,
+            id: format!("stream:{}", name(&public)),
+            role: Role::Stream,
+            not_after: None,
+            signing: generate()?,
+            external: Some(signer),
         })
+    }
+
+    /// The public half.
+    pub fn verifying_key(&self) -> VerifyingKey {
+        #[cfg(feature = "external")]
+        if let Some(x) = &self.external {
+            return x.public();
+        }
+        self.signing.verifying_key()
+    }
+
+    /// Signs `msg`. A key held here always can. An external signer may fail (out of reach), and
+    /// its signature is checked against the key's public half before it is used: a token never
+    /// puts a bad one in a stream.
+    pub fn sign(&self, msg: &[u8]) -> io::Result<Signature> {
+        #[cfg(feature = "external")]
+        if let Some(x) = &self.external {
+            let sig = x.sign(msg)?;
+            x.public().verify_strict(msg, &sig).map_err(|_| {
+                invalid(format!(
+                    "the signer of {} returned a signature that does not verify",
+                    self.id
+                ))
+            })?;
+            return Ok(sig);
+        }
+        Ok(self.signing.sign(msg))
+    }
+
+    /// Whether an external signer keeps it.
+    fn is_external(&self) -> bool {
+        #[cfg(feature = "external")]
+        return self.external.is_some();
+        #[cfg(not(feature = "external"))]
+        false
     }
 
     /// `ed25519:<hex>`.
     pub fn public(&self) -> String {
-        encode_key(&self.signing.verifying_key())
+        encode_key(&self.verifying_key())
     }
 
     /// The fingerprint verifiers pin: `sha256:<hex>`.
     pub fn fingerprint(&self) -> String {
-        fingerprint(&self.signing.verifying_key())
+        fingerprint(&self.verifying_key())
     }
 
     /// Whether a session key may still sign at `now_ms`.
@@ -67,6 +144,11 @@ impl Key {
             .as_deref()
             .and_then(encoding::parse_ts)
             .is_none_or(|t| now_ms <= t)
+    }
+
+    /// The name it is stored under: the first 12 hex digits of its fingerprint.
+    fn name(&self) -> String {
+        name(&self.verifying_key())
     }
 }
 
@@ -77,7 +159,11 @@ fn generate() -> io::Result<SigningKey> {
 }
 
 fn short(k: &SigningKey) -> String {
-    fingerprint(&k.verifying_key())["sha256:".len()..][..12].to_owned()
+    name(&k.verifying_key())
+}
+
+fn name(k: &VerifyingKey) -> String {
+    fingerprint(k)["sha256:".len()..][..12].to_owned()
 }
 
 fn key_entry(event: KeyEvent) -> Entry {
@@ -124,6 +210,24 @@ pub enum Backend {
     /// The OS keychain: macOS Keychain or Windows Credential Manager. Refused elsewhere for now.
     #[cfg(feature = "keychain")]
     Keychain,
+    /// **Experimental.** A PKCS#11 token, which generated the key and never lets it out; the
+    /// description names it by its id, the token's label for it.
+    #[cfg(feature = "pkcs11")]
+    Pkcs11,
+}
+
+impl Backend {
+    /// **Experimental** (for the `pkcs11` feature). Where the session keys a stream key kept here
+    /// certifies are kept: the same place, except for a token, whose sessions are key files (a
+    /// token signs only key events).
+    #[doc(hidden)]
+    pub fn for_sessions(self) -> Backend {
+        match self {
+            #[cfg(feature = "pkcs11")]
+            Backend::Pkcs11 => Backend::File,
+            b => b,
+        }
+    }
 }
 
 /// The public description of a stored key; the secret is never in it.
@@ -140,10 +244,22 @@ pub struct KeyMeta {
 
 /// The keys of one stream: `<keys dir>/<stream id>/`, one `<name>.json` per key and, for the file
 /// backend, its `<name>.secret`.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct KeyStore {
     dir: PathBuf,
     stream: String,
+    /// Where keys with the `pkcs11` backend are.
+    #[cfg(feature = "pkcs11")]
+    token: Option<Arc<pkcs11::Token>>,
+}
+
+impl std::fmt::Debug for KeyStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyStore")
+            .field("dir", &self.dir)
+            .field("stream", &self.stream)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The default keys directory: `$TENBRI_KEYS`, else `$XDG_CONFIG_HOME/tenbri/keys`, else
@@ -254,7 +370,16 @@ impl KeyStore {
         Ok(KeyStore {
             dir,
             stream: stream.to_owned(),
+            #[cfg(feature = "pkcs11")]
+            token: None,
         })
+    }
+
+    /// The same store, finding keys with the `pkcs11` backend in `token`.
+    #[cfg(feature = "pkcs11")]
+    pub fn with_token(mut self, token: Arc<pkcs11::Token>) -> KeyStore {
+        self.token = Some(token);
+        self
     }
 
     pub fn dir(&self) -> &Path {
@@ -266,16 +391,27 @@ impl KeyStore {
         &self.stream
     }
 
-    /// Stores `key`; refuses to replace a key already stored under the same name.
+    /// Stores `key`; refuses to replace a key already stored under the same name. A key a token
+    /// keeps is stored with the `pkcs11` backend, which records only its description.
     pub fn save(&self, key: &Key, backend: Backend) -> io::Result<()> {
-        let name = short(&key.signing);
+        let name = key.name();
         let secret = Zeroizing::new(encoding::hex(key.signing.as_bytes()));
         match backend {
-            Backend::File => {
+            Backend::File if !key.is_external() => {
                 write_new(&self.dir.join(format!("{name}.secret")), secret.as_bytes())?
             }
             #[cfg(feature = "keychain")]
-            Backend::Keychain => keychain::set(&self.account(&name), &secret)?,
+            Backend::Keychain if !key.is_external() => {
+                keychain::set(&self.account(&name), &secret)?
+            }
+            #[cfg(feature = "pkcs11")]
+            Backend::Pkcs11 if key.is_external() => {}
+            backend => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("key {} cannot be kept in the {backend:?} backend", key.id),
+                ));
+            }
         }
         let meta = KeyMeta {
             id: key.id.clone(),
@@ -288,43 +424,103 @@ impl KeyStore {
         write_new(&self.dir.join(format!("{name}.json")), &json)
     }
 
-    /// The descriptions of every stored key.
+    /// The descriptions of every stored key this build can use. A key kept in a backend this
+    /// build lacks (a PKCS#11 token without the `pkcs11` feature) is left out, so the others
+    /// still work.
     pub fn list(&self) -> io::Result<Vec<KeyMeta>> {
-        let mut out = vec![];
+        Ok(self.described()?.0)
+    }
+
+    /// The descriptions this build can use, and the raw ones of keys kept in a backend it lacks.
+    fn described(&self) -> io::Result<(Vec<KeyMeta>, Vec<serde_json::Value>)> {
+        let (mut out, mut other) = (vec![], vec![]);
         for e in fs::read_dir(&self.dir)? {
             let p = e?.path();
-            if p.extension().is_some_and(|x| x == "json") {
-                out.push(
-                    serde_json::from_slice(&fs::read(&p)?)
-                        .map_err(|e| invalid(format!("{}: {e}", p.display())))?,
-                );
+            if p.extension().is_none_or(|x| x != "json") {
+                continue;
+            }
+            let bad = |e: serde_json::Error| invalid(format!("{}: {e}", p.display()));
+            let v: serde_json::Value = serde_json::from_slice(&fs::read(&p)?).map_err(bad)?;
+            match serde_json::from_value::<KeyMeta>(v.clone()) {
+                Ok(m) => out.push(m),
+                Err(_)
+                    if v["backend"].is_string()
+                        && serde_json::from_value::<Backend>(v["backend"].clone()).is_err() =>
+                {
+                    other.push(v)
+                }
+                Err(e) => return Err(bad(e)),
             }
         }
         out.sort_by(|a: &KeyMeta, b| a.id.cmp(&b.id));
-        Ok(out)
+        Ok((out, other))
+    }
+
+    /// The public half of the stream's genesis key, as described here (whichever backend keeps
+    /// it): what this machine pins the stream to.
+    pub fn genesis(&self) -> io::Result<Option<VerifyingKey>> {
+        let (known, other) = self.described()?;
+        let streams = known
+            .into_iter()
+            .filter(|m| m.role == Role::Stream)
+            .map(|m| m.public)
+            .chain(
+                other
+                    .iter()
+                    .filter(|v| v["role"] == "stream")
+                    .filter_map(|v| v["pub"].as_str().map(str::to_owned)),
+            );
+        Ok(streams
+            .filter_map(|p| tenbri_core::sign::decode_key(&p).ok())
+            .find(|k| tenbri_core::sign::stream_id(k) == self.stream))
     }
 
     /// Loads the key with id `id`.
     pub fn load(&self, id: &str) -> io::Result<Key> {
-        let meta = self
-            .list()?
-            .into_iter()
-            .find(|m| m.id == id)
-            .ok_or_else(|| {
-                io::Error::new(
+        let (known, other) = self.described()?;
+        let meta = known.into_iter().find(|m| m.id == id).ok_or_else(|| {
+            match other.iter().find(|v| v["id"] == id) {
+                Some(v) => io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    format!(
+                        "key {id} is kept in the {} backend, which this build lacks",
+                        v["backend"]
+                    ),
+                ),
+                None => io::Error::new(
                     io::ErrorKind::NotFound,
                     format!("no key {id} for {}", self.stream),
-                )
-            })?;
+                ),
+            }
+        })?;
         let public =
             tenbri_core::sign::decode_key(&meta.public).map_err(|e| invalid(e.to_string()))?;
-        let name = fingerprint(&public)["sha256:".len()..][..12].to_owned();
+        let name = name(&public);
         let secret: Zeroizing<String> = match meta.backend {
             Backend::File => {
                 Zeroizing::new(fs::read_to_string(self.dir.join(format!("{name}.secret")))?)
             }
             #[cfg(feature = "keychain")]
             Backend::Keychain => keychain::get(&self.account(&name))?,
+            #[cfg(feature = "pkcs11")]
+            Backend::Pkcs11 => {
+                let token = self.token.as_ref().ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!(
+                            "key {id} is in a PKCS#11 token, and none is configured \
+                             (TENBRI_PKCS11_MODULE, TENBRI_PKCS11_TOKEN, TENBRI_PKCS11_PIN)"
+                        ),
+                    )
+                })?;
+                return Ok(Key {
+                    external: Some(token.key(&meta.id, &public)?),
+                    signing: generate()?,
+                    id: meta.id,
+                    role: meta.role,
+                    not_after: meta.not_after,
+                });
+            }
         };
         let seed = Zeroizing::new(
             encoding::unhex::<32>(secret.trim())
@@ -336,27 +532,26 @@ impl KeyStore {
                 "key {id}'s secret does not match its public key"
             )));
         }
-        Ok(Key {
-            id: meta.id,
-            role: meta.role,
-            not_after: meta.not_after,
-            signing,
-        })
+        Ok(Key::local(meta.id, meta.role, meta.not_after, signing))
     }
 
     /// Deletes key `id`: its secret, then its description. The file is unlinked, not overwritten;
-    /// on a copy-on-write disk or with snapshots, copies may remain.
+    /// on a copy-on-write disk or with snapshots, copies may remain. A token's key stays in the
+    /// token: destroy it with the token's own tools.
     pub fn delete(&self, id: &str) -> io::Result<()> {
-        let key = self.load(id)?;
-        let name = short(&key.signing);
-        match self
-            .list()?
-            .into_iter()
-            .find(|m| m.id == id)
-            .map(|m| m.backend)
-        {
+        let meta = self.list()?.into_iter().find(|m| m.id == id);
+        let public = match &meta {
+            Some(m) => {
+                tenbri_core::sign::decode_key(&m.public).map_err(|e| invalid(e.to_string()))?
+            }
+            None => self.load(id)?.verifying_key(),
+        };
+        let name = name(&public);
+        match meta.map(|m| m.backend) {
             #[cfg(feature = "keychain")]
             Some(Backend::Keychain) => keychain::delete(&self.account(&name))?,
+            #[cfg(feature = "pkcs11")]
+            Some(Backend::Pkcs11) => {}
             _ => fs::remove_file(self.dir.join(format!("{name}.secret")))?,
         }
         fs::remove_file(self.dir.join(format!("{name}.json")))
@@ -391,6 +586,9 @@ impl KeyStore {
         format!("{}/{name}", self.stream)
     }
 }
+
+#[cfg(feature = "pkcs11")]
+pub mod pkcs11;
 
 fn invalid(msg: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg)
@@ -519,6 +717,36 @@ mod tests {
     }
 
     #[test]
+    fn keys_in_a_backend_this_build_lacks_leave_the_others_working() {
+        let tmp = std::env::temp_dir().join(format!("tenbri-lacks-{}", std::process::id()));
+        let (keys, stream) = (tmp.join("keys"), tmp.join("stream"));
+        fs::create_dir_all(&stream).unwrap();
+        let sk = Key::new_stream().unwrap();
+        let id = tenbri_core::sign::stream_id(&sk.verifying_key());
+        let store = KeyStore::open(&keys, &stream, &id).unwrap();
+        let sess = Key::new_session(0, SESSION_LIFETIME_MS).unwrap();
+        store.save(&sess, Backend::File).unwrap();
+        // The stream key, described as kept where this build cannot reach.
+        let meta = serde_json::json!({
+            "id": sk.id, "role": "stream", "pub": sk.public(), "backend": "kms"
+        });
+        fs::write(store.dir().join("x.json"), meta.to_string()).unwrap();
+
+        assert_eq!(store.list().unwrap().len(), 1, "the session key only");
+        assert_eq!(store.load(&sess.id).unwrap().public(), sess.public());
+        assert_eq!(store.genesis().unwrap(), Some(sk.verifying_key()));
+        let err = store.load(&sk.id).err().unwrap();
+        assert_eq!(err.kind(), io::ErrorKind::Unsupported, "{err}");
+        assert!(err.to_string().contains("\"kms\" backend"), "{err}");
+        fs::write(store.dir().join("y.json"), "{\"id\": 1}").unwrap();
+        assert!(
+            store.list().is_err(),
+            "a broken description is still an error"
+        );
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
     fn stores_loads_and_refuses_keys_under_the_stream() {
         let tmp = std::env::temp_dir().join(format!("tenbri-keys-{}", std::process::id()));
         let (keys, stream) = (tmp.join("keys"), tmp.join("stream"));
@@ -533,7 +761,7 @@ mod tests {
         );
 
         let sk = Key::new_stream().unwrap();
-        let id = tenbri_core::sign::stream_id(&sk.signing.verifying_key());
+        let id = tenbri_core::sign::stream_id(&sk.verifying_key());
         let store = KeyStore::open(&keys, &stream, &id).unwrap();
         let sess = Key::new_session(0, SESSION_LIFETIME_MS).unwrap();
         store.save(&sk, Backend::File).unwrap();

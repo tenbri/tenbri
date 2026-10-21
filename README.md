@@ -191,7 +191,7 @@ v0.1.0 ships every feature below, each labelled:
 | Area | Stable | Experimental |
 |---|---|---|
 | Format and integrity | ✅ Entry format v1 · ✅ canonical bytes · ✅ hash chain · ✅ signatures · ✅ intent and outcome entries · ✅ links · ✅ Merkle checkpoints · ✅ receipts | |
-| Keys | ✅ Stream and session keys · ✅ rotation · ✅ revocation · ✅ key file · ✅ OS keychain (macOS, Windows) | ⬜ PKCS#11 · ⬜ cloud KMS · ⬜ passkey attestations |
+| Keys | ✅ Stream and session keys · ✅ rotation · ✅ revocation · ✅ key file · ✅ OS keychain (macOS, Windows) | ✅ [PKCS#11 stream key](docs/hsm.md) (HSM, YubiHSM, SoftHSM) · ⬜ cloud KMS · ⬜ passkey attestations |
 | Storage | ✅ Local disk · 🚧 AWS S3 (tested on MinIO; real S3 before rc.1) · ✅ Cloudflare R2 · ✅ MinIO | ⬜ Google Cloud Storage · ⬜ Azure Blob · ⬜ Postgres |
 | Anchoring | ⬜ Checkpoint publishing to auditors · ✅ RFC 3161 timestamps | ⬜ Sigstore Rekor · ✅ C2SP witness cosignatures ([docs/witnesses.md](docs/witnesses.md)) |
 | Privacy | ✅ Blob encryption · ✅ per-subject keyed digests and erasure · ✅ local key store | |

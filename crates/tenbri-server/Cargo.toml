@@ -13,6 +13,8 @@ name = "tenbrid"
 path = "src/main.rs"
 
 [features]
+# Experimental, not in the release builds: stream keys in a PKCS#11 token ([pkcs11] in the config).
+pkcs11 = ["tenbri-keys/pkcs11", "dep:zeroize"]
 # Witness cosignatures (Experimental): [witness] sends checkpoints to C2SP witnesses.
 witness = ["tenbri-anchor/witness", "tenbri-merkle/witness", "tenbri-writer/witness"]
 
@@ -42,8 +44,10 @@ tonic = { version = "0.14", default-features = false, features = ["codegen", "ro
 tonic-health = { version = "0.14", default-features = false }
 tonic-prost = "0.14"
 utoipa = { version = "5", features = ["yaml"] }
+zeroize = { version = "1", optional = true }
 
 [dev-dependencies]
+zeroize = "1"
 # tests/contract.rs: src/proto.rs is generated from contract/proto and checked against it.
 protox = "0.9"
 tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }

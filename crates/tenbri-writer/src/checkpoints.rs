@@ -154,7 +154,7 @@ impl<S: Store> Writer<S, Checkpoints> {
                 .list()?
                 .into_iter()
                 .find(|m| m.id == stream_key.id)
-                .map_or(tenbri_keys::Backend::File, |m| m.backend);
+                .map_or(tenbri_keys::Backend::File, |m| m.backend.for_sessions());
             keys.save(&session, backend)?;
             let mut e = tenbri_keys::certify(&session);
             e.ext = Some(witness::ext(&key.verifying_key()));

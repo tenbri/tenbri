@@ -55,6 +55,9 @@ enum Command {
         #[cfg(feature = "keychain")]
         #[arg(long)]
         keychain: bool,
+        #[cfg(feature = "pkcs11")]
+        #[command(flatten)]
+        token: TokenArgs,
     },
     /// Append one entry, read as JSON on stdin; print it as stored.
     #[command(after_help = format!("{APPEND_EXAMPLE}\n\n{ALLOWED}"))]
@@ -261,6 +264,20 @@ allowed values:
   durability      local, replicated, postgres
   links[].rel     cause, handoff, approval";
 
+/// Experimental: the stream key in a PKCS#11 token.
+#[cfg(feature = "pkcs11")]
+#[derive(Args)]
+struct TokenArgs {
+    /// Experimental: generate the stream key in a PKCS#11 token (an HSM), which never lets it
+    /// out; session keys stay key files. The token is TENBRI_PKCS11_TOKEN (its label) in the
+    /// module TENBRI_PKCS11_MODULE, opened with the user PIN TENBRI_PKCS11_PIN.
+    #[arg(long, requires = "experimental")]
+    pkcs11: bool,
+    /// Allow an Experimental feature.
+    #[arg(long)]
+    experimental: bool,
+}
+
 /// Whose data keys: a subject's, or the tenant's (entries without a subject).
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -300,6 +317,36 @@ enum KeysCommand {
         /// Who rotated, recorded as the note's principal (a person id).
         #[arg(long, value_name = "ID")]
         by: Option<String>,
+    },
+    /// Experimental: make a new stream key in the PKCS#11 token (TENBRI_PKCS11_*), certified by
+    /// the current one, which signs nothing more. Session keys it certified stay valid until they
+    /// expire. Moves an existing stream's key into a token.
+    #[cfg(feature = "pkcs11")]
+    RotateStream {
+        #[arg(env = "TENBRI_STREAM")]
+        path: String,
+        /// Allow an Experimental feature.
+        #[arg(long)]
+        experimental: bool,
+    },
+    /// Experimental: revoke a key from a sequence number on, signed by the stream key: the
+    /// entries it signed there or later stop verifying, including ones already written (a stolen
+    /// session key).
+    #[cfg(feature = "pkcs11")]
+    Revoke {
+        #[arg(env = "TENBRI_STREAM")]
+        path: String,
+        /// The key's id (sess:… or stream:…), as `tenbri keys list` or the entries' signer show it.
+        id: String,
+        /// The first sequence number it may no longer sign.
+        #[arg(long, value_name = "SEQ")]
+        from: u64,
+        /// Do not ask for confirmation.
+        #[arg(long)]
+        yes: bool,
+        /// Allow an Experimental feature.
+        #[arg(long)]
+        experimental: bool,
     },
 }
 
@@ -399,21 +446,21 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
             })
     };
     match &cli.command {
-        #[cfg(feature = "keychain")]
-        Command::Init { path, keychain } => {
-            init(
-                path,
-                &keys_dir()?,
-                if *keychain {
-                    Backend::Keychain
-                } else {
-                    Backend::File
-                },
-            )
-            .await
+        Command::Init {
+            path,
+            #[cfg(feature = "keychain")]
+            keychain,
+            #[cfg(feature = "pkcs11")]
+            token,
+        } => {
+            let backend = backend(
+                #[cfg(feature = "keychain")]
+                *keychain,
+                #[cfg(feature = "pkcs11")]
+                token,
+            )?;
+            init(path, &keys_dir()?, backend).await
         }
-        #[cfg(not(feature = "keychain"))]
-        Command::Init { path } => init(path, &keys_dir()?, Backend::File).await,
         Command::Append { path } => append(path, &keys_dir()?).await,
         Command::Verify {
             path,
@@ -687,6 +734,22 @@ async fn run(cli: Cli) -> Result<u8, Fail> {
                     e.seq
                 );
                 Ok(0)
+            }
+            #[cfg(feature = "pkcs11")]
+            KeysCommand::RotateStream { path, experimental } => {
+                experimental_only(*experimental)?;
+                rotate_stream(path, &keys_dir()?).await
+            }
+            #[cfg(feature = "pkcs11")]
+            KeysCommand::Revoke {
+                path,
+                id,
+                from,
+                yes,
+                experimental,
+            } => {
+                experimental_only(*experimental)?;
+                revoke(path, &keys_dir()?, id, *from, *yes).await
             }
         },
     }
@@ -1102,12 +1165,18 @@ async fn store(location: &str) -> Result<AnyStore, Fail> {
 }
 
 /// The key directory of `stream`, kept apart from it when it is a local directory.
+/// With `TENBRI_PKCS11_*` set, keys kept in a PKCS#11 token are found in it.
 fn key_store(keys: &Path, location: &str, stream: &str) -> io::Result<KeyStore> {
-    if tenbri_store::is_url(location) {
-        KeyStore::open_for_object_store(keys, stream)
+    let ks = if tenbri_store::is_url(location) {
+        KeyStore::open_for_object_store(keys, stream)?
     } else {
-        KeyStore::open(keys, Path::new(location), stream)
+        KeyStore::open(keys, Path::new(location), stream)?
+    };
+    #[cfg(feature = "pkcs11")]
+    if let Some(t) = token() {
+        return Ok(ks.with_token(t));
     }
+    Ok(ks)
 }
 
 /// A `--key` value as a fingerprint: `sha256:…` as given, or the fingerprint of `ed25519:…`.
@@ -1324,6 +1393,141 @@ async fn show(
     Ok(0)
 }
 
+/// Where a new stream key goes, from `--keychain` and `--pkcs11`: a key file by default.
+fn backend(
+    #[cfg(feature = "keychain")] keychain: bool,
+    #[cfg(feature = "pkcs11")] token: &TokenArgs,
+) -> Result<Backend, Fail> {
+    #[cfg(feature = "pkcs11")]
+    if token.pkcs11 {
+        #[cfg(feature = "keychain")]
+        if keychain {
+            return Err(Fail(2, "--keychain and --pkcs11 exclude each other".into()));
+        }
+        return Ok(Backend::Pkcs11);
+    }
+    #[cfg(feature = "keychain")]
+    if keychain {
+        return Ok(Backend::Keychain);
+    }
+    Ok(Backend::File)
+}
+
+#[cfg(feature = "pkcs11")]
+fn experimental_only(experimental: bool) -> Result<(), Fail> {
+    if experimental {
+        Ok(())
+    } else {
+        Err(Fail(
+            2,
+            "this command is Experimental: pass --experimental".into(),
+        ))
+    }
+}
+
+/// A new stream key, kept in `backend`: generated here, or in the token.
+fn new_stream_key(backend: Backend) -> Result<Key, Fail> {
+    match backend {
+        #[cfg(feature = "pkcs11")]
+        Backend::Pkcs11 => {
+            let token = token().ok_or_else(|| {
+                Fail(
+                    2,
+                    "the PKCS#11 token needs TENBRI_PKCS11_MODULE, TENBRI_PKCS11_TOKEN and \
+                     TENBRI_PKCS11_PIN"
+                        .into(),
+                )
+            })?;
+            Ok(token.new_stream()?)
+        }
+        _ => Ok(Key::new_stream()?),
+    }
+}
+
+/// The PKCS#11 token named by `TENBRI_PKCS11_MODULE`, `TENBRI_PKCS11_TOKEN` and
+/// `TENBRI_PKCS11_PIN`, if all are set; opened when a key in it is first used. The PIN is never a
+/// flag, which other users could see.
+#[cfg(feature = "pkcs11")]
+fn token() -> Option<std::sync::Arc<tenbri_keys::pkcs11::Token>> {
+    let var = |k: &str| std::env::var(k).ok();
+    Some(tenbri_keys::pkcs11::Token::new(
+        PathBuf::from(var("TENBRI_PKCS11_MODULE")?),
+        var("TENBRI_PKCS11_TOKEN")?,
+        zeroize::Zeroizing::new(var("TENBRI_PKCS11_PIN")?),
+    ))
+}
+
+/// What to tell the operator when a write fails after the token made `key`: it stays there.
+#[cfg(feature = "pkcs11")]
+fn left_in_token(key: &Key, backend: Backend) -> impl Fn(Fail) -> Fail + '_ {
+    move |Fail(code, msg)| match backend {
+        Backend::Pkcs11 => Fail(
+            code,
+            format!(
+                "{msg}\nthe PKCS#11 token keeps the key it made, labelled {}; if no stream names \
+                 it, delete it with the token's tools",
+                key.id
+            ),
+        ),
+        _ => Fail(code, msg),
+    }
+}
+
+/// `tenbri keys rotate-stream`: a new stream key in the token, described, then the rotation
+/// written, signed by the current stream key.
+#[cfg(feature = "pkcs11")]
+async fn rotate_stream(path: &str, keys: &Path) -> Result<u8, Fail> {
+    let (store, ks) = open_stream(path, keys).await?;
+    let mut w = open_writer(store, ks.clone()).await?;
+    let current = w
+        .chain()
+        .stream_key()
+        .ok_or_else(|| Fail(2, format!("{path} has no stream key")))?
+        .to_owned();
+    let old = ks.load(&current)?;
+    let new = new_stream_key(Backend::Pkcs11)?;
+    let left = left_in_token(&new, Backend::Pkcs11);
+    // Described first: a rotation never names a key this machine has no description of.
+    ks.save(&new, Backend::Pkcs11).map_err(|e| left(e.into()))?;
+    let e = w.rotate(&old, &new).await.map_err(|e| left(e.into()))?;
+    println!(
+        "rotated the stream key of {}: {current} is now {} (PKCS#11), recorded at seq {}",
+        ks.stream(),
+        new.id,
+        e.seq
+    );
+    println!("{current} signs nothing more: delete its secret and every copy of it");
+    Ok(0)
+}
+
+/// `tenbri keys revoke`: revokes `id` from `from`, signed by the current stream key, once
+/// confirmed.
+#[cfg(feature = "pkcs11")]
+async fn revoke(path: &str, keys: &Path, id: &str, from: u64, yes: bool) -> Result<u8, Fail> {
+    let (store, ks) = open_stream(path, keys).await?;
+    let mut w = open_writer(store, ks.clone()).await?;
+    let current = w
+        .chain()
+        .stream_key()
+        .ok_or_else(|| Fail(2, format!("{path} has no stream key")))?
+        .to_owned();
+    let stream_key = ks.load(&current)?;
+    if !yes {
+        eprint!(
+            "This revokes {id} from seq {from}: every entry it signed there or later, including \
+             entries already written, stops verifying, for good. Type {id} to confirm: "
+        );
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        if line.trim_end_matches(['\r', '\n']) != id {
+            return Err(Fail(2, "not confirmed; nothing was revoked".into()));
+        }
+    }
+    let e = w.revoke(&stream_key, id, from).await?;
+    println!("revoked {id} from seq {from}, recorded at seq {}", e.seq);
+    Ok(0)
+}
+
 async fn init(path: &str, keys: &Path, backend: Backend) -> Result<u8, Fail> {
     if !tenbri_store::is_url(path) {
         let dir = Path::new(path);
@@ -1336,13 +1540,20 @@ async fn init(path: &str, keys: &Path, backend: Backend) -> Result<u8, Fail> {
     if store.get("HEAD").await?.is_some() {
         return Err(Fail(2, format!("{path} already holds a stream")));
     }
-    let stream_key = Key::new_stream()?;
-    let session = Key::new_session(now_ms(), SESSION_LIFETIME_MS)?;
-    let id = sign::stream_id(&stream_key.signing.verifying_key());
-    let ks = key_store(keys, path, &id)?;
-    ks.save(&stream_key, backend)?;
-    ks.save(&session, backend)?;
-    Writer::create(store, &stream_key, session).await?;
+    let stream_key = new_stream_key(backend)?;
+    let made = async {
+        let session = Key::new_session(now_ms(), SESSION_LIFETIME_MS)?;
+        let id = sign::stream_id(&stream_key.verifying_key());
+        let ks = key_store(keys, path, &id)?;
+        ks.save(&stream_key, backend)?;
+        ks.save(&session, backend.for_sessions())?;
+        Writer::create(store, &stream_key, session).await?;
+        Ok::<_, Fail>((id, ks))
+    }
+    .await;
+    #[cfg(feature = "pkcs11")]
+    let made = made.map_err(left_in_token(&stream_key, backend));
+    let (id, ks) = made?;
     let pins = tenbri_keys::record_pin(keys, path, &stream_key.fingerprint())
         .map_err(|e| Fail(2, e.to_string()))?;
     println!("created stream {id} at {path}");
@@ -1375,22 +1586,16 @@ async fn open_stream(path: &str, keys: &Path) -> Result<(AnyStore, KeyStore), Fa
 /// A writer for the stream, pinned to its genesis key as this machine holds it, with the latest
 /// checkpoint kept with the keys as the HEAD floor, and a session key it may sign with.
 async fn open_writer(store: AnyStore, ks: KeyStore) -> Result<Writer<AnyStore, Checkpoints>, Fail> {
-    let genesis = ks
-        .list()?
-        .iter()
-        .filter(|m| m.role == Role::Stream)
-        .filter_map(|m| sign::decode_key(&m.public).ok())
-        .find(|k| sign::stream_id(k) == ks.stream())
-        .ok_or_else(|| {
-            Fail(
-                2,
-                format!(
-                    "no stream key for {} in {}",
-                    ks.stream(),
-                    ks.dir().display()
-                ),
-            )
-        })?;
+    let genesis = ks.genesis()?.ok_or_else(|| {
+        Fail(
+            2,
+            format!(
+                "no stream key for {} in {}",
+                ks.stream(),
+                ks.dir().display()
+            ),
+        )
+    })?;
     let mut w = Writer::open(store, Some(&sign::fingerprint(&genesis)))
         .await?
         .with_checkpoints(Some(ks.dir().join(CHECKPOINT_FILE)))

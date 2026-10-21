@@ -30,5 +30,7 @@ tenbri-store.workspace = true
 tokio = { version = "1", features = ["rt", "sync", "time"] }
 
 [dev-dependencies]
+# tests/external.rs: a stream key kept by an external signer (a double of an HSM).
+tenbri-keys = { workspace = true, features = ["external"] }
 tenbri-store = { workspace = true, features = ["s3"] }
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
