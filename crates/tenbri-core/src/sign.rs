@@ -76,8 +76,26 @@ pub fn verify(key: &VerifyingKey, msg: &[u8], sig: &str) -> Result<(), Error> {
 
 /// Signs `entry` with `key` (setting `sig`) and returns its stored line, without the line feed.
 pub fn sign_entry(entry: &mut Entry, key: &SigningKey) -> Result<Vec<u8>, Error> {
-    let value = canon::from_serialize(entry)?;
-    entry.sig = encode_sig(&key.sign(&message(ENTRY_PREFIX, &value, &["sig"])));
+    let msg = entry_message(entry)?;
+    seal_entry(entry, &key.sign(&msg))
+}
+
+/// **Experimental.** The message an entry's signature covers. With [`seal_entry`], [`sign_entry`]
+/// for a key that signs elsewhere (a hardware token).
+#[doc(hidden)]
+pub fn entry_message(entry: &Entry) -> Result<Vec<u8>, Error> {
+    Ok(message(
+        ENTRY_PREFIX,
+        &canon::from_serialize(entry)?,
+        &["sig"],
+    ))
+}
+
+/// **Experimental.** Sets `entry`'s signature to `sig` and returns its stored line, without the
+/// line feed.
+#[doc(hidden)]
+pub fn seal_entry(entry: &mut Entry, sig: &Signature) -> Result<Vec<u8>, Error> {
+    entry.sig = encode_sig(sig);
     Ok(canon::to_vec(&canon::from_serialize(entry)?))
 }
 
@@ -97,7 +115,21 @@ pub fn attest(entry: &Entry, key: &SigningKey) -> Result<Attestation, Error> {
 
 /// Signs `head` with `key` (setting `sig`) and returns its stored bytes.
 pub fn sign_head(head: &mut Head, key: &SigningKey) -> Vec<u8> {
+    let msg = head_message(head);
+    seal_head(head, &key.sign(&msg))
+}
+
+/// **Experimental.** The message a HEAD's signature covers; with [`seal_head`], [`sign_head`] in
+/// two steps.
+#[doc(hidden)]
+pub fn head_message(head: &Head) -> Vec<u8> {
     let value = canon::from_serialize(head).expect("a HEAD holds only strings and integers");
-    head.sig = encode_sig(&key.sign(&message(HEAD_PREFIX, &value, &["sig"])));
+    message(HEAD_PREFIX, &value, &["sig"])
+}
+
+/// **Experimental.** Sets `head`'s signature to `sig` and returns its stored bytes.
+#[doc(hidden)]
+pub fn seal_head(head: &mut Head, sig: &Signature) -> Vec<u8> {
+    head.sig = encode_sig(sig);
     canon::to_vec(&canon::from_serialize(head).expect("a HEAD holds only strings and integers"))
 }

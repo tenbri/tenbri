@@ -19,6 +19,11 @@
 //! tsa = "https://tsa.example/"     # the timestamp authority's URL
 //! every_s = 3600                   # how often the latest checkpoint is timestamped
 //!
+//! [pkcs11]                         # Experimental, built with the `pkcs11` feature: stream keys
+//! module = "/usr/lib/softhsm/libsofthsm2.so"  # in a PKCS#11 token; TENBRI_PKCS11_MODULE
+//! token = "tenbri"                 # the token's label; TENBRI_PKCS11_TOKEN. The user PIN comes
+//!                                  # from TENBRI_PKCS11_PIN only, never the file
+//!
 //! [[tokens]]                       # `tenbrid token` makes one
 //! sha256 = "sha256:..."            # SHA-256 of the bearer token; the token is never stored
 //! principal = { kind = "agent", id = "support-assistant" }
@@ -55,6 +60,34 @@ pub struct Config {
     #[serde(default)]
     pub tokens: Vec<TokenConfig>,
     pub anchor: Option<AnchorConfig>,
+    /// Where stream keys with the `pkcs11` backend are (`tenbri init --pkcs11`).
+    #[cfg(feature = "pkcs11")]
+    pub pkcs11: Option<Pkcs11Config>,
+}
+
+/// **Experimental.** A PKCS#11 token holding stream keys; tenbrid asks it to sign key events
+/// (certifying its session keys) and keeps only session keys itself.
+#[cfg(feature = "pkcs11")]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Pkcs11Config {
+    /// The module: `libsofthsm2.so`, `yubihsm_pkcs11.so`, a cloud HSM's client library.
+    pub module: PathBuf,
+    /// The token's label.
+    pub token: String,
+    /// The user PIN, from `TENBRI_PKCS11_PIN` only.
+    #[serde(skip)]
+    pub pin: zeroize::Zeroizing<String>,
+}
+
+#[cfg(feature = "pkcs11")]
+impl std::fmt::Debug for Pkcs11Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pkcs11Config")
+            .field("module", &self.module)
+            .field("token", &self.token)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Opt-in RFC 3161 timestamps: the latest checkpoint of every stream, every `every_s` seconds
@@ -135,6 +168,24 @@ impl Config {
         c.schema = env("TENBRI_SCHEMA")
             .map(PathBuf::from)
             .or(c.schema.map(|p| base.join(p)));
+        #[cfg(feature = "pkcs11")]
+        {
+            let module = env("TENBRI_PKCS11_MODULE")
+                .map(PathBuf::from)
+                .or(c.pkcs11.as_ref().map(|p| base.join(&p.module)));
+            let token = env("TENBRI_PKCS11_TOKEN").or(c.pkcs11.as_ref().map(|p| p.token.clone()));
+            c.pkcs11 = match (module, token) {
+                (Some(module), Some(token)) => Some(Pkcs11Config {
+                    module,
+                    token,
+                    pin: env("TENBRI_PKCS11_PIN")
+                        .map(zeroize::Zeroizing::new)
+                        .ok_or("pkcs11: set the token's user PIN in TENBRI_PKCS11_PIN")?,
+                }),
+                (None, None) => None,
+                _ => return Err("pkcs11: needs both a module and a token".into()),
+            };
+        }
         for s in c.streams.values_mut() {
             if !tenbri_store::is_url(&s.path) {
                 s.path = base.join(&s.path).to_string_lossy().into_owned();
@@ -222,6 +273,45 @@ mod tests {
         assert_eq!(c.keys.unwrap(), Path::new("/k"));
         assert_eq!(c.deadline_ms, 50);
         assert!(Config::parse(FILE, Path::new("."), |_| Some("x".into())).is_err());
+    }
+
+    #[cfg(feature = "pkcs11")]
+    #[test]
+    fn a_token_from_the_file_or_the_environment() {
+        let file = format!("{FILE}[pkcs11]\nmodule = \"lib/softhsm2.so\"\ntoken = \"t\"\n");
+        let env = |token: &'static str| {
+            move |k: &str| match k {
+                "TENBRI_PKCS11_PIN" => Some("1234".to_owned()),
+                "TENBRI_PKCS11_TOKEN" => Some(token.to_owned()).filter(|t| !t.is_empty()),
+                _ => None,
+            }
+        };
+        let p = Config::parse(&file, Path::new("/etc/tenbri"), env(""))
+            .unwrap()
+            .pkcs11
+            .unwrap();
+        assert_eq!(
+            (p.module.as_path(), p.token.as_str(), p.pin.as_str()),
+            (Path::new("/etc/tenbri/lib/softhsm2.so"), "t", "1234")
+        );
+        assert!(
+            !format!("{p:?}").contains("1234"),
+            "the PIN is never printed"
+        );
+        let c = Config::parse(&file, Path::new("."), env("u")).unwrap();
+        assert_eq!(c.pkcs11.unwrap().token, "u");
+        let no_pin = Config::parse(&file, Path::new("."), |_| None).unwrap_err();
+        assert!(no_pin.contains("TENBRI_PKCS11_PIN"), "{no_pin}");
+        assert!(
+            Config::parse(FILE, Path::new("."), env("u")).is_err(),
+            "a token without a module"
+        );
+        assert!(
+            Config::parse(FILE, Path::new("."), |_| None)
+                .unwrap()
+                .pkcs11
+                .is_none()
+        );
     }
 
     #[test]

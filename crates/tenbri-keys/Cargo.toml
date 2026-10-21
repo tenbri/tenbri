@@ -15,8 +15,13 @@ workspace = true
 # Secrets in the OS keychain: macOS Keychain and Windows Credential Manager. The Linux Secret
 # Service needs keyring 4 (Rust 1.88, above the MSRV); until then it is refused, never mocked.
 keychain = ["dep:keyring"]
+# Experimental: keys an external signer keeps (the `External` seam), and the stream key in a
+# PKCS#11 token (an HSM; SoftHSM for tests), never exportable.
+external = []
+pkcs11 = ["external", "dep:cryptoki"]
 
 [dependencies]
+cryptoki = { version = "0.12", optional = true }
 getrandom = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
