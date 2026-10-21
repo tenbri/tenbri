@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.0-beta.6](https://github.com/tenbri/tenbri/compare/v0.1.0-beta.5...v0.1.0-beta.6) (2026-10-21)
+
+
+### Features
+
+* **bindings:** write through tenbrid, so the agent holds no signing key ([4e28332](https://github.com/tenbri/tenbri/commit/4e28332a319095b7839d86a24007f3cc04335f50))
+* **keys:** keep the stream key in a PKCS[#11](https://github.com/tenbri/tenbri/issues/11) token (Experimental) ([#62](https://github.com/tenbri/tenbri/issues/62)) ([4986a3a](https://github.com/tenbri/tenbri/commit/4986a3a0e934b6a1efa888521f74b679bc769320))
+* **proxy:** record every MCP tool call from the wire ([4e28332](https://github.com/tenbri/tenbri/commit/4e28332a319095b7839d86a24007f3cc04335f50))
+* **server:** keyed digests through tenbrid, pinned by the proxy ([#63](https://github.com/tenbri/tenbri/issues/63)) ([8900923](https://github.com/tenbri/tenbri/commit/89009232cdbe5e57f31e2d9b9bc4ea554b2db78b))
+* **witness:** C2SP witness cosignatures for checkpoints (Experimental) ([#61](https://github.com/tenbri/tenbri/issues/61)) ([3c5ee86](https://github.com/tenbri/tenbri/commit/3c5ee867b179f3c1a6e8b70d8520ff3a3bf8362c))
+
+
+### Fixes
+
+* **deps:** bump tokio 1.54.0 to 1.54.1, the old one is yanked ([5709a04](https://github.com/tenbri/tenbri/commit/5709a04872b990d9e912aeb004b7b9f0a1ffd886))
+
 ## [0.1.0-beta.5](https://github.com/tenbri/tenbri/compare/v0.1.0-beta.4...v0.1.0-beta.5) (2026-10-20)
 
 
