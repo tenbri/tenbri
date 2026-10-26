@@ -53,7 +53,7 @@ zeroize = "1"
 protox = "0.9"
 tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
 tenbri-index.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
 tenbri-anchor = { workspace = true, features = ["test-tsa", "test-witness"] }
 tonic = { version = "0.14", default-features = false, features = ["channel"] }
 
