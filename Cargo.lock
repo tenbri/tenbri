@@ -3407,7 +3407,7 @@ dependencies = [
  "rsa",
  "serde_json",
  "sha1",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tenbri-core",
  "tenbri-merkle",
  "tokio",
