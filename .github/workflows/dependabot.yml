@@ -21,7 +21,7 @@ jobs:
       PR: ${{ github.event.pull_request.html_url }}
     steps:
       - id: meta
-        uses: dependabot/fetch-metadata@v2
+        uses: dependabot/fetch-metadata@v3
       - if: steps.meta.outputs.update-type != 'version-update:semver-major'
         run: gh pr merge --auto --squash "$PR"
       - if: steps.meta.outputs.update-type == 'version-update:semver-major'
